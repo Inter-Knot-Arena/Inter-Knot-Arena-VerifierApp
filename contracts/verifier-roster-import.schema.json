@@ -1,0 +1,31 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VerifierRosterImportPayload",
+  "type": "object",
+  "required": ["uid", "region", "agents"],
+  "properties": {
+    "uid": { "type": "string", "pattern": "^[0-9]{6,12}$" },
+    "region": { "type": "string", "enum": ["NA", "EU", "ASIA", "SEA", "OTHER"] },
+    "fullSync": { "type": "boolean" },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["agentId"],
+        "properties": {
+          "agentId": { "type": "string" },
+          "owned": { "type": "boolean" },
+          "level": { "type": "number" },
+          "dupes": { "type": "number" },
+          "mindscape": { "type": "number" },
+          "promotion": { "type": "number" },
+          "talent": { "type": "number" },
+          "core": { "type": "number" },
+          "weapon": { "type": "object" },
+          "discs": { "type": "array" },
+          "confidence": { "type": "object" }
+        }
+      }
+    }
+  }
+}
