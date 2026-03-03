@@ -6,7 +6,9 @@
     <UseWPF>true</UseWPF>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <PublishSingleFile>false</PublishSingleFile>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <SelfContained>true</SelfContained>
   </PropertyGroup>
   <ItemGroup>
@@ -14,5 +16,13 @@
     <ProjectReference Include="..\\VerifierApp.ApiClient\\VerifierApp.ApiClient.csproj" />
     <ProjectReference Include="..\\VerifierApp.Auth\\VerifierApp.Auth.csproj" />
     <ProjectReference Include="..\\VerifierApp.WorkerHost\\VerifierApp.WorkerHost.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Bundled\\VerifierWorker.exe" Condition="Exists('Bundled\\VerifierWorker.exe')">
+      <LogicalName>Bundled/VerifierWorker.exe</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Bundled\\ika_native.dll" Condition="Exists('Bundled\\ika_native.dll')">
+      <LogicalName>Bundled/ika_native.dll</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 </Project>
