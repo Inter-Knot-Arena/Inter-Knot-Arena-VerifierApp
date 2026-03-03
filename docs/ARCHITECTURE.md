@@ -34,8 +34,9 @@
 2. Open browser authorize URL.
 3. Receive loopback callback.
 4. Exchange callback code to access/refresh tokens.
-5. Run roster scan -> import payload.
-6. For matches, request verifier session and submit precheck/in-run evidence with HMAC signature.
+5. Extract bundled worker/native assets from `VerifierApp.exe` into `%LOCALAPPDATA%`.
+6. Run roster scan -> import payload.
+7. For matches, request verifier session and submit precheck/in-run evidence with HMAC signature.
 
 ## Security model
 

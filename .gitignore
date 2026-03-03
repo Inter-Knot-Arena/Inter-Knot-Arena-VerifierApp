@@ -12,3 +12,5 @@ __pycache__/
 *.suo
 worker/.venv/
 native/ika_native/build/
+src/VerifierApp.UI/Bundled/*.exe
+src/VerifierApp.UI/Bundled/*.dll

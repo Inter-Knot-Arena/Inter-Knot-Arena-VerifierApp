@@ -16,7 +16,6 @@ Desktop verifier for Inter-Knot Arena with:
 - `src/VerifierApp.WorkerHost` - named pipe worker bridge + native P/Invoke
 - `worker/` - Python worker (JSON-RPC over named pipe)
 - `native/ika_native` - C++ DLL bridge (`ika_native.dll`)
-- `packaging/VerifierApp.iss` - Inno Setup installer
 - `scripts/build.ps1` - build + publish pipeline
 
 ## Runtime architecture
@@ -25,9 +24,10 @@ Desktop verifier for Inter-Knot Arena with:
 2. Browser opens verifier bridge URL and completes OAuth.
 3. Loopback callback receives `requestId + code`.
 4. UI exchanges code for bearer verifier tokens and stores them via DPAPI.
-5. UI starts `VerifierWorker.exe` and talks over named pipe.
-6. Worker executes `ocr.scan`, `cv.precheck`, `cv.inrun`.
-7. Native module provides fast OS-level input lock and frame hash primitives.
+5. `VerifierApp.exe` extracts bundled worker/native assets to `%LOCALAPPDATA%`.
+6. UI starts `VerifierWorker.exe` and talks over named pipe.
+7. Worker executes `ocr.scan`, `cv.precheck`, `cv.inrun`.
+8. Native module provides fast OS-level input lock and frame hash primitives.
 
 ## Build prerequisites
 
@@ -35,7 +35,7 @@ Desktop verifier for Inter-Knot Arena with:
 - Visual Studio Build Tools (MSVC v143)
 - CMake 3.24+
 - Python 3.12+
-- Inno Setup 6+
+- .NET SDK 10+
 
 ## Build
 
@@ -46,22 +46,13 @@ Set-Location "Inter-Knot Arena VerifierApp"
 
 Output:
 
-- Host publish: `artifacts/publish/win-x64/VerifierApp.exe`
-- Worker: `artifacts/publish/win-x64/VerifierWorker.exe`
-- Native DLL: `artifacts/publish/win-x64/ika_native.dll`
-
-## Installer build
-
-Open `packaging/VerifierApp.iss` in Inno Setup and compile.
-
-Installer output:
-
-- `artifacts/installer/Inter-Knot-Arena-VerifierApp-Setup.exe`
+- Single-file app: `artifacts/publish/win-x64/VerifierApp.exe`
+- Worker/native are embedded into `VerifierApp.exe` and extracted on first launch.
 
 ## Code signing
 
 ```powershell
-.\scripts\sign.ps1 -FilePath ".\artifacts\installer\Inter-Knot-Arena-VerifierApp-Setup.exe"
+.\scripts\sign.ps1 -FilePath ".\artifacts\publish\win-x64\VerifierApp.exe"
 ```
 
 Env vars required:
