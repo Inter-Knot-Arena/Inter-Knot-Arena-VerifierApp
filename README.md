@@ -3,6 +3,7 @@
 Desktop verifier for Inter-Knot Arena with:
 
 - OAuth loopback login.
+- In-app sign-in via email/password or Google (browser).
 - Full OCR roster scan import (`POST /verifier/roster/import`).
 - Match precheck/in-run evidence submission.
 - Hybrid stack: WPF + Python worker + C++ native module.
@@ -48,6 +49,7 @@ Output:
 
 - Single-file app: `artifacts/publish/win-x64/VerifierApp.exe`
 - Worker/native are embedded into `VerifierApp.exe` and extracted on first launch.
+- Release publish does not include `.pdb` files.
 
 ## Code signing
 
