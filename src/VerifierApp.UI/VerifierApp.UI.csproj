@@ -27,6 +27,7 @@
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Assets\\app-icon.ico" />
+    <Resource Include="Assets\\app-icon.ico" />
+    <Resource Include="Assets\\app-icon.png" />
   </ItemGroup>
 </Project>

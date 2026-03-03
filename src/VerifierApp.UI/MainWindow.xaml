@@ -7,7 +7,7 @@
         MinHeight="700"
         MinWidth="1040"
         WindowStartupLocation="CenterScreen"
-        Icon="Assets/app-icon.ico"
+        Icon="pack://application:,,,/Assets/app-icon.ico"
         FontFamily="Bahnschrift">
     <Grid>
         <Grid.Background>
