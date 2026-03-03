@@ -6,7 +6,13 @@ public sealed class WorkerProcessLauncher : IDisposable
 {
     private Process? _process;
 
-    public void Start(string workerExecutablePath, string pipeName = "ika_verifier_worker")
+    public void Start(
+        string workerExecutablePath,
+        string pipeName = "ika_verifier_worker",
+        string? bundleRoot = null,
+        string? ocrRoot = null,
+        string? cvRoot = null
+    )
     {
         if (_process is { HasExited: false })
         {
@@ -21,6 +27,19 @@ public sealed class WorkerProcessLauncher : IDisposable
             CreateNoWindow = true,
             WorkingDirectory = Path.GetDirectoryName(workerExecutablePath) ?? AppContext.BaseDirectory
         };
+        if (!string.IsNullOrWhiteSpace(bundleRoot))
+        {
+            startInfo.Environment["IKA_BUNDLE_ROOT"] = bundleRoot;
+        }
+        if (!string.IsNullOrWhiteSpace(ocrRoot))
+        {
+            startInfo.Environment["IKA_OCR_SCAN_ROOT"] = ocrRoot;
+        }
+        if (!string.IsNullOrWhiteSpace(cvRoot))
+        {
+            startInfo.Environment["IKA_CV_ROOT"] = cvRoot;
+        }
+
         _process = Process.Start(startInfo)
                    ?? throw new InvalidOperationException("Failed to start worker process");
     }

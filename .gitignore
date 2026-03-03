@@ -14,5 +14,4 @@ worker/.venv/
 worker/build/
 worker/dist/
 native/ika_native/build/
-src/VerifierApp.UI/Bundled/*.exe
-src/VerifierApp.UI/Bundled/*.dll
+src/VerifierApp.UI/Bundled/*

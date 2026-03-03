@@ -25,6 +25,15 @@
     <EmbeddedResource Include="Bundled\\ika_native.dll" Condition="Exists('Bundled\\ika_native.dll')">
       <LogicalName>Bundled/ika_native.dll</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Bundled\\ocr_scan_bundle.zip" Condition="Exists('Bundled\\ocr_scan_bundle.zip')">
+      <LogicalName>Bundled/ocr_scan_bundle.zip</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Bundled\\cv_bundle.zip" Condition="Exists('Bundled\\cv_bundle.zip')">
+      <LogicalName>Bundled/cv_bundle.zip</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Bundled\\bundle.manifest.json" Condition="Exists('Bundled\\bundle.manifest.json')">
+      <LogicalName>Bundled/bundle.manifest.json</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\\app-icon.ico" />

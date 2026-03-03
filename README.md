@@ -7,6 +7,7 @@ Desktop verifier for Inter-Knot Arena with:
 - Full OCR roster scan import (`POST /verifier/roster/import`).
 - Match precheck/in-run evidence submission.
 - Hybrid stack: WPF + Python worker + C++ native module.
+- Bundled OCR/CV runtime packages with SHA256 integrity checks.
 
 ## Repository layout
 
@@ -28,15 +29,15 @@ Desktop verifier for Inter-Knot Arena with:
 5. `VerifierApp.exe` extracts bundled worker/native assets to `%LOCALAPPDATA%`.
 6. UI starts `VerifierWorker.exe` and talks over named pipe.
 7. Worker executes `ocr.scan`, `cv.precheck`, `cv.inrun`.
-8. Native module provides fast OS-level input lock and frame hash primitives.
+8. Native module provides OS-level input lock and real desktop frame hash capture.
+9. Bundled OCR/CV zip packages are integrity-checked and extracted before worker startup.
 
 ## Build prerequisites
 
-- .NET SDK 8.0+
+- .NET SDK 10.0.x
 - Visual Studio Build Tools (MSVC v143)
 - CMake 3.24+
 - Python 3.12+
-- .NET SDK 10+
 
 ## Build
 
@@ -48,7 +49,7 @@ Set-Location "Inter-Knot Arena VerifierApp"
 Output:
 
 - Single-file app: `artifacts/publish/win-x64/VerifierApp.exe`
-- Worker/native are embedded into `VerifierApp.exe` and extracted on first launch.
+- Worker/native/OCR/CV bundles are embedded into `VerifierApp.exe` and extracted on first launch.
 - Release publish does not include `.pdb` files.
 
 ## Code signing
