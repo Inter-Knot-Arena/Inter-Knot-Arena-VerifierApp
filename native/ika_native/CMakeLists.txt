@@ -12,6 +12,12 @@ target_include_directories(ika_native
 
 target_compile_features(ika_native PRIVATE cxx_std_20)
 
+target_link_libraries(ika_native PRIVATE
+    bcrypt
+    Gdi32
+    User32
+)
+
 if(MSVC)
     target_compile_options(ika_native PRIVATE /W4 /EHsc)
 else()
