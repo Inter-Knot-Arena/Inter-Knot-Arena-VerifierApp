@@ -18,7 +18,8 @@ public sealed class WorkerProcessLauncher : IDisposable
             FileName = workerExecutablePath,
             Arguments = $"--pipe {pipeName}",
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(workerExecutablePath) ?? AppContext.BaseDirectory
         };
         _process = Process.Start(startInfo)
                    ?? throw new InvalidOperationException("Failed to start worker process");

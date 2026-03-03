@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using VerifierApp.ApiClient;
@@ -16,6 +18,7 @@ public partial class MainWindow : Window
     private readonly WorkerProcessLauncher _workerLauncher = new();
     private NamedPipeWorkerClient? _workerClient;
     private CancellationTokenSource? _monitorCts;
+    private BundledAssetPaths? _bundledAssets;
 
     public MainWindow()
     {
@@ -96,7 +99,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        await RunUiActionAsync("Starting match monitor...", async _ =>
+        await RunUiActionAsync("Starting match monitor...", async ct =>
         {
             await EnsureWorkerAsync();
             var worker = _workerClient ?? throw new InvalidOperationException("Worker is not ready");
@@ -107,6 +110,7 @@ public partial class MainWindow : Window
             }
 
             _monitorCts = new CancellationTokenSource();
+            var monitorToken = _monitorCts.Token;
             MatchMonitorButton.Content = "Stop Match Monitor";
             _ = Task.Run(async () =>
             {
@@ -114,7 +118,7 @@ public partial class MainWindow : Window
                 {
                     using var api = BuildApiClient();
                     var monitor = new MatchMonitorService(api, worker);
-                    await monitor.RunMatchAsync(matchId, _monitorCts.Token);
+                    await monitor.RunMatchAsync(matchId, monitorToken);
                     await Dispatcher.InvokeAsync(() =>
                     {
                         AppendStatus("Match monitor completed.");
@@ -129,7 +133,7 @@ public partial class MainWindow : Window
                 {
                     await Dispatcher.InvokeAsync(() => AppendStatus($"Monitor error: {ex.Message}"));
                 }
-            }, _monitorCts.Token);
+            });
         });
     }
 
@@ -140,16 +144,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        var workerExe = Path.Combine(AppContext.BaseDirectory, "VerifierWorker.exe");
-        if (!File.Exists(workerExe))
-        {
-            throw new FileNotFoundException(
-                "VerifierWorker.exe not found. Run scripts/build.ps1 first.",
-                workerExe
-            );
-        }
+        _bundledAssets ??= BundledAssetManager.EnsureExtracted(Assembly.GetExecutingAssembly());
+        NativeLibraryBootstrap.Initialize(_bundledAssets.NativeDllPath);
 
-        _workerLauncher.Start(workerExe);
+        _workerLauncher.Start(_bundledAssets.WorkerExePath);
         await Task.Delay(1200);
         _workerClient = new NamedPipeWorkerClient();
         var healthy = await _workerClient.HealthAsync(CancellationToken.None);

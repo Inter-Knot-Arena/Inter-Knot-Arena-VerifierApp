@@ -6,4 +6,7 @@
   <ItemGroup>
     <ProjectReference Include="..\\VerifierApp.Core\\VerifierApp.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+  </ItemGroup>
 </Project>
