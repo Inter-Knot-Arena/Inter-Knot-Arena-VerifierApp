@@ -6,26 +6,34 @@ public sealed class MatchMonitorService
 {
     private readonly IVerifierApiClient _apiClient;
     private readonly IWorkerClient _worker;
+    private readonly INativeBridge _nativeBridge;
 
     public MatchMonitorService(
         IVerifierApiClient apiClient,
-        IWorkerClient worker
+        IWorkerClient worker,
+        INativeBridge nativeBridge
     )
     {
         _apiClient = apiClient;
         _worker = worker;
+        _nativeBridge = nativeBridge;
     }
 
     public async Task RunMatchAsync(
         string matchId,
         string userId,
+        string locale,
+        string resolution,
+        Action<string, DetectionResult>? evidenceObserver,
         CancellationToken ct
     )
     {
         var session = await _apiClient.CreateMatchSessionAsync(matchId, ct);
 
-        var precheck = await _worker.RunPrecheckAsync(matchId, ct);
+        var precheckHash = _nativeBridge.CaptureFrameHash();
+        var precheck = await _worker.RunPrecheckAsync(matchId, precheckHash, locale, resolution, ct);
         await SubmitAsync(matchId, userId, "PRECHECK", precheck, session.VerifierSessionToken, ct);
+        evidenceObserver?.Invoke("PRECHECK", precheck);
 
         if (!session.RequireInrunCheck)
         {
@@ -35,8 +43,10 @@ public sealed class MatchMonitorService
         while (!ct.IsCancellationRequested)
         {
             await Task.Delay(TimeSpan.FromSeconds(session.InrunFrequencySec), ct);
-            var inrun = await _worker.RunInrunAsync(matchId, ct);
+            var inrunHash = _nativeBridge.CaptureFrameHash();
+            var inrun = await _worker.RunInrunAsync(matchId, inrunHash, locale, resolution, ct);
             await SubmitAsync(matchId, userId, "INRUN", inrun, session.VerifierSessionToken, ct);
+            evidenceObserver?.Invoke("INRUN", inrun);
         }
     }
 
@@ -49,12 +59,23 @@ public sealed class MatchMonitorService
         CancellationToken ct
     )
     {
+        var frameHash = detection.FrameHash;
+        if (string.IsNullOrWhiteSpace(frameHash))
+        {
+            frameHash = _nativeBridge.CaptureFrameHash();
+        }
+
+        var normalizedDetection = detection with
+        {
+            FrameHash = frameHash
+        };
+
         var nonce = VerifierSignatureService.CreateNonce();
         var submission = new EvidenceSubmission(
             MatchId: matchId,
             UserId: userId,
             Type: type,
-            Detection: detection,
+            Detection: normalizedDetection,
             VerifierSessionToken: verifierSessionToken,
             VerifierNonce: nonce,
             VerifierSignature: string.Empty

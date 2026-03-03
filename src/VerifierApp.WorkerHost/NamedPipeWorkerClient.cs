@@ -33,11 +33,31 @@ public sealed class NamedPipeWorkerClient : IWorkerClient, IAsyncDisposable
     public Task<RosterScanResult> RunRosterScanAsync(RosterScanCommand command, CancellationToken ct) =>
         SendAsync<RosterScanResult>("ocr.scan", command, ct);
 
-    public Task<DetectionResult> RunPrecheckAsync(string matchId, CancellationToken ct) =>
-        SendAsync<DetectionResult>("cv.precheck", new { matchId }, ct);
+    public Task<DetectionResult> RunPrecheckAsync(
+        string matchId,
+        string? frameHashHint,
+        string locale,
+        string resolution,
+        CancellationToken ct
+    ) =>
+        SendAsync<DetectionResult>(
+            "cv.precheck",
+            new { matchId, frameHashHint, locale, resolution },
+            ct
+        );
 
-    public Task<DetectionResult> RunInrunAsync(string matchId, CancellationToken ct) =>
-        SendAsync<DetectionResult>("cv.inrun", new { matchId }, ct);
+    public Task<DetectionResult> RunInrunAsync(
+        string matchId,
+        string? frameHashHint,
+        string locale,
+        string resolution,
+        CancellationToken ct
+    ) =>
+        SendAsync<DetectionResult>(
+            "cv.inrun",
+            new { matchId, frameHashHint, locale, resolution },
+            ct
+        );
 
     private async Task<T> SendAsync<T>(string method, object payload, CancellationToken ct)
     {

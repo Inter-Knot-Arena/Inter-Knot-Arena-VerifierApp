@@ -17,8 +17,22 @@ public interface IVerifierApiClient
 public interface IWorkerClient
 {
     Task<RosterScanResult> RunRosterScanAsync(RosterScanCommand command, CancellationToken ct);
-    Task<DetectionResult> RunPrecheckAsync(string matchId, CancellationToken ct);
-    Task<DetectionResult> RunInrunAsync(string matchId, CancellationToken ct);
+    Task<DetectionResult> RunPrecheckAsync(
+        string matchId,
+        string? frameHashHint,
+        string locale,
+        string resolution,
+        CancellationToken ct
+    );
+
+    Task<DetectionResult> RunInrunAsync(
+        string matchId,
+        string? frameHashHint,
+        string locale,
+        string resolution,
+        CancellationToken ct
+    );
+
     Task<bool> HealthAsync(CancellationToken ct);
 }
 

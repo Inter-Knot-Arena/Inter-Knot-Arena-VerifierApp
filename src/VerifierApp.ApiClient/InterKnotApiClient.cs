@@ -115,13 +115,32 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
                 uid = result.Uid,
                 region = result.Region,
                 fullSync = result.FullSync,
+                modelVersion = result.ModelVersion,
+                scanMeta = result.ScanMeta,
+                timingMs = result.TimingMs,
+                locale = result.Locale,
+                resolution = result.Resolution,
+                lowConfReasons = result.LowConfReasons ?? Array.Empty<string>(),
+                confidenceByField = result.ConfidenceByField ?? new Dictionary<string, double>(),
                 agents = result.Agents.Select(agent => new
                 {
                     agentId = agent.AgentId,
-                    owned = agent.Owned,
                     level = agent.Level,
                     mindscape = agent.Mindscape,
-                    confidence = agent.ConfidenceByField
+                    weapon = agent.Weapon is null
+                        ? null
+                        : new
+                        {
+                            weaponId = agent.Weapon.WeaponId,
+                            level = agent.Weapon.Level
+                        },
+                    discs = (agent.Discs ?? Array.Empty<DiscScanResult>()).Select(disc => new
+                    {
+                        slot = disc.Slot,
+                        setId = disc.SetId,
+                        level = disc.Level
+                    }).ToList(),
+                    confidence = agent.ConfidenceByField ?? new Dictionary<string, double>()
                 }).ToList()
             },
             includeBearer: true,

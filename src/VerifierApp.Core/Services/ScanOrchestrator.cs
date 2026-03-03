@@ -22,6 +22,8 @@ public sealed class ScanOrchestrator
     public async Task<RosterImportResult> ExecuteRosterScanAsync(
         string regionHint,
         bool fullSync,
+        string locale,
+        string resolution,
         CancellationToken ct
     )
     {
@@ -37,10 +39,33 @@ public sealed class ScanOrchestrator
                 new RosterScanCommand(
                     SessionId: Guid.NewGuid().ToString("N"),
                     RegionHint: regionHint,
-                    FullSync: fullSync
+                    FullSync: fullSync,
+                    Locale: locale,
+                    Resolution: resolution,
+                    InputLockActive: true
                 ),
                 ct
             );
+
+            if (!string.IsNullOrWhiteSpace(scan.ErrorCode))
+            {
+                throw new InvalidOperationException(
+                    $"Scan aborted [{scan.ErrorCode}]: {scan.ErrorMessage ?? "worker scan failure"}."
+                );
+            }
+
+            if (string.IsNullOrWhiteSpace(scan.Uid))
+            {
+                throw new InvalidOperationException("Scan aborted: UID was not extracted.");
+            }
+
+            if (scan.LowConfReasons is { Count: > 0 })
+            {
+                throw new InvalidOperationException(
+                    $"Scan aborted: low confidence ({string.Join(", ", scan.LowConfReasons)})."
+                );
+            }
+
             return await _apiClient.ImportRosterAsync(scan, ct);
         }
         finally

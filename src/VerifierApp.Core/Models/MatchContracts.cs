@@ -12,10 +12,16 @@ public sealed record MatchVerifierSession(
 public sealed record DetectionResult(
     string Type,
     IReadOnlyList<string> DetectedAgents,
+    IReadOnlyList<string>? UnexpectedAgents,
     string Result,
     IReadOnlyDictionary<string, double> Confidence,
+    IReadOnlyDictionary<string, double>? ConfidenceByField,
     string FrameHash,
-    string ModelVersion
+    string ModelVersion,
+    IReadOnlyList<string>? LowConfReasons,
+    double? TimingMs,
+    string? Resolution,
+    string? Locale
 );
 
 public sealed record EvidenceSubmission(

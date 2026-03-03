@@ -186,7 +186,9 @@ public partial class MainWindow : Window
                 var orchestrator = new ScanOrchestrator(api, worker, new NativeBridge());
                 var region = GetRegion();
                 var fullSync = FullSyncCheckBox.IsChecked == true;
-                var result = await orchestrator.ExecuteRosterScanAsync(region, fullSync, ct);
+                var locale = GetLocale();
+                var resolution = GetResolution();
+                var result = await orchestrator.ExecuteRosterScanAsync(region, fullSync, locale, resolution, ct);
                 AppendStatus("SCAN_IMPORT_RESULT", $"Roster import status: {result.Status}. {result.Message}");
             });
         }
@@ -249,8 +251,30 @@ public partial class MainWindow : Window
                 try
                 {
                     using var api = BuildApiClient();
-                    var monitor = new MatchMonitorService(api, worker);
-                    await monitor.RunMatchAsync(matchId, tokens.UserId, monitorToken);
+                    var monitor = new MatchMonitorService(api, worker, new NativeBridge());
+                    await monitor.RunMatchAsync(
+                        matchId,
+                        tokens.UserId,
+                        GetLocale(),
+                        GetResolution(),
+                        (phase, detection) =>
+                        {
+                            var marker = detection.Result switch
+                            {
+                                "VIOLATION" => "VIOLATION",
+                                "LOW_CONF" => "LOW_CONF",
+                                _ => "PASS"
+                            };
+                            Dispatcher.Invoke(() =>
+                            {
+                                AppendStatus(
+                                    $"MONITOR_{marker}",
+                                    $"{phase}: {marker} | frameHash={detection.FrameHash}"
+                                );
+                            });
+                        },
+                        monitorToken
+                    );
                     await Dispatcher.InvokeAsync(() =>
                     {
                         _monitorRunning = false;
@@ -479,7 +503,12 @@ public partial class MainWindow : Window
         _bundledAssets ??= BundledAssetManager.EnsureExtracted(Assembly.GetExecutingAssembly());
         NativeLibraryBootstrap.Initialize(_bundledAssets.NativeDllPath);
 
-        _workerLauncher.Start(_bundledAssets.WorkerExePath);
+        _workerLauncher.Start(
+            _bundledAssets.WorkerExePath,
+            bundleRoot: _bundledAssets.RootPath,
+            ocrRoot: _bundledAssets.OcrScanRoot,
+            cvRoot: _bundledAssets.CvRoot
+        );
         Exception? lastError = null;
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -542,6 +571,24 @@ public partial class MainWindow : Window
             return value;
         }
         return "OTHER";
+    }
+
+    private string GetLocale()
+    {
+        if (LocaleComboBox.SelectedItem is ComboBoxItem item && item.Content is string value)
+        {
+            return value;
+        }
+        return "EN";
+    }
+
+    private string GetResolution()
+    {
+        if (ResolutionComboBox.SelectedItem is ComboBoxItem item && item.Content is string value)
+        {
+            return value;
+        }
+        return "1080p";
     }
 
     private Uri ParseApiBaseUri()
@@ -711,6 +758,8 @@ public partial class MainWindow : Window
 
         RosterScanButton.IsEnabled = _isAuthenticated && !_isBusy && !_monitorRunning && !_scanRunning;
         MatchMonitorButton.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning;
+        LocaleComboBox.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning && !_monitorRunning;
+        ResolutionComboBox.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning && !_monitorRunning;
         LogoutButton.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning;
     }
 

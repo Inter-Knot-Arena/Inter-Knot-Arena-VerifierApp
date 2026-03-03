@@ -11,6 +11,12 @@ Python worker process for OCR scan and match-time CV checks.
 
 Transport: JSON-RPC over Windows named pipe.
 
+Runtime dependencies:
+
+- OCR package path from `IKA_OCR_SCAN_ROOT` or bundle extraction directory.
+- CV package path from `IKA_CV_ROOT` or bundle extraction directory.
+- Bundle root is provided by host via `IKA_BUNDLE_ROOT`.
+
 ## Local build
 
 ```powershell
