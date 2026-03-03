@@ -7,6 +7,12 @@
     "uid": { "type": "string", "pattern": "^[0-9]{6,12}$" },
     "region": { "type": "string", "enum": ["NA", "EU", "ASIA", "SEA", "OTHER"] },
     "fullSync": { "type": "boolean" },
+    "modelVersion": { "type": "string" },
+    "scanMeta": { "type": "string" },
+    "confidenceByField": {
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
     "agents": {
       "type": "array",
       "items": {
@@ -23,7 +29,10 @@
           "core": { "type": "number" },
           "weapon": { "type": "object" },
           "discs": { "type": "array" },
-          "confidence": { "type": "object" }
+          "confidenceByField": {
+            "type": "object",
+            "additionalProperties": { "type": "number" }
+          }
         }
       }
     }

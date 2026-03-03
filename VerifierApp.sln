@@ -1,0 +1,45 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VerifierApp.Core", "src\VerifierApp.Core\VerifierApp.Core.csproj", "{B202D7A4-03E0-4D6D-BAB1-2F39887A2A10}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VerifierApp.ApiClient", "src\VerifierApp.ApiClient\VerifierApp.ApiClient.csproj", "{85D32818-BA0E-4A37-8E62-3F004329A123}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VerifierApp.Auth", "src\VerifierApp.Auth\VerifierApp.Auth.csproj", "{A2034920-EC3F-4BCF-8BC3-17F39F6C4B2E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VerifierApp.WorkerHost", "src\VerifierApp.WorkerHost\VerifierApp.WorkerHost.csproj", "{6D4BD03F-CA34-45A0-95D6-0B011D147E66}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VerifierApp.UI", "src\VerifierApp.UI\VerifierApp.UI.csproj", "{336D0A70-3E8A-4E4D-A4DE-0DA5ED245A12}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B202D7A4-03E0-4D6D-BAB1-2F39887A2A10}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B202D7A4-03E0-4D6D-BAB1-2F39887A2A10}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B202D7A4-03E0-4D6D-BAB1-2F39887A2A10}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B202D7A4-03E0-4D6D-BAB1-2F39887A2A10}.Release|Any CPU.Build.0 = Release|Any CPU
+		{85D32818-BA0E-4A37-8E62-3F004329A123}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{85D32818-BA0E-4A37-8E62-3F004329A123}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{85D32818-BA0E-4A37-8E62-3F004329A123}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{85D32818-BA0E-4A37-8E62-3F004329A123}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A2034920-EC3F-4BCF-8BC3-17F39F6C4B2E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A2034920-EC3F-4BCF-8BC3-17F39F6C4B2E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A2034920-EC3F-4BCF-8BC3-17F39F6C4B2E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A2034920-EC3F-4BCF-8BC3-17F39F6C4B2E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6D4BD03F-CA34-45A0-95D6-0B011D147E66}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6D4BD03F-CA34-45A0-95D6-0B011D147E66}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6D4BD03F-CA34-45A0-95D6-0B011D147E66}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6D4BD03F-CA34-45A0-95D6-0B011D147E66}.Release|Any CPU.Build.0 = Release|Any CPU
+		{336D0A70-3E8A-4E4D-A4DE-0DA5ED245A12}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{336D0A70-3E8A-4E4D-A4DE-0DA5ED245A12}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{336D0A70-3E8A-4E4D-A4DE-0DA5ED245A12}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{336D0A70-3E8A-4E4D-A4DE-0DA5ED245A12}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

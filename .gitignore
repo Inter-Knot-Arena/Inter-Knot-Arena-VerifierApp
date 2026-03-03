@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+artifacts/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.user
+*.suo
+worker/.venv/
+native/ika_native/build/

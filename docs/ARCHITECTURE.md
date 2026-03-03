@@ -1,34 +1,52 @@
-﻿# VerifierApp Architecture (Draft)
+﻿# VerifierApp Architecture (v1)
 
-## Modules
+## Components
 
-1. Auth Client
-- Launches OAuth/device flow and stores short-lived verifier token.
+1. `VerifierApp.UI` (WPF)
+- login, scan start, monitor start/stop, status feed.
 
-2. Scan Orchestrator
-- Drives guided scan steps and enforces locked workflow.
+2. `VerifierApp.ApiClient`
+- desktop auth (`/auth/verifier/device/*`)
+- roster import (`/verifier/roster/import`)
+- match verifier session + evidence endpoints.
 
-3. Frame Capture
-- Captures window frames with fixed cadence and low overhead.
+3. `VerifierApp.Auth`
+- PKCE code verifier/challenge
+- loopback callback listener
+- DPAPI token persistence.
 
-4. OCR Adapter
-- Calls OCR model from OCR_Scan repo and normalizes output.
+4. `VerifierApp.WorkerHost`
+- named pipe JSON-RPC client
+- worker process lifecycle
+- native bridge P/Invoke.
 
-5. Match Monitor
-- Uses CV model from CV repo for pre-check and in-run checks.
+5. `worker/VerifierWorker.exe` (Python)
+- methods: `health`, `ocr.scan`, `cv.precheck`, `cv.inrun`.
 
-6. API Sync
-- Sends payloads to web API endpoints.
+6. `native/ika_native.dll` (C++)
+- `ika_native_lock_input`
+- `ika_native_unlock_input`
+- `ika_native_capture_frame_hash`
 
-## Performance budget (initial)
+## Data flow
 
-- Idle CPU: < 2%
-- Match monitor CPU: < 8% on i5 7th gen
-- RAM baseline: < 300 MB
-- OCR burst mode RAM: < 700 MB
+1. Start device auth from app.
+2. Open browser authorize URL.
+3. Receive loopback callback.
+4. Exchange callback code to access/refresh tokens.
+5. Run roster scan -> import payload.
+6. For matches, request verifier session and submit precheck/in-run evidence with HMAC signature.
 
-## Security notes
+## Security model
 
-- No process injection, no memory reading from game process.
-- Sign all verifier payloads with session nonce/challenge.
-- Store only required crops/metadata according to server policy.
+- No game memory reading.
+- No DLL injection into game process.
+- Bearer tokens stored encrypted via DPAPI.
+- Nonce + signature required for verifier match evidence.
+
+## Performance goals
+
+- Idle CPU < 2%
+- Monitoring CPU < 8% on i5 7th gen
+- RAM baseline < 300 MB
+- OCR burst RAM < 700 MB

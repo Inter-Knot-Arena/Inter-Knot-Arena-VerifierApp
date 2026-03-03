@@ -1,0 +1,43 @@
+<Window x:Class="VerifierApp.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Inter-Knot Arena Verifier" Height="420" Width="720"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="API URL" VerticalAlignment="Center" Width="80"/>
+            <TextBox x:Name="ApiUrlTextBox" Width="460" Text="http://localhost:4000"/>
+            <Button x:Name="LoginButton" Content="Login (OAuth Loopback)" Margin="12,0,0,0" Width="180" Click="LoginButton_OnClick"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="Region Hint" VerticalAlignment="Center" Width="80"/>
+            <ComboBox x:Name="RegionComboBox" Width="120" SelectedIndex="0">
+                <ComboBoxItem Content="OTHER"/>
+                <ComboBoxItem Content="NA"/>
+                <ComboBoxItem Content="EU"/>
+                <ComboBoxItem Content="ASIA"/>
+                <ComboBoxItem Content="SEA"/>
+            </ComboBox>
+            <CheckBox x:Name="FullSyncCheckBox" Content="Full Sync" IsChecked="True" Margin="16,0,0,0" VerticalAlignment="Center"/>
+            <Button x:Name="RosterScanButton" Content="Run Roster Scan + Import" Margin="12,0,0,0" Width="220" Click="RosterScanButton_OnClick"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="Match ID" VerticalAlignment="Center" Width="80"/>
+            <TextBox x:Name="MatchIdTextBox" Width="280"/>
+            <Button x:Name="MatchMonitorButton" Content="Start Match Monitor" Margin="12,0,0,0" Width="180" Click="MatchMonitorButton_OnClick"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" Text="Status" FontWeight="Bold" Margin="0,4,0,6"/>
+        <TextBox Grid.Row="4" x:Name="StatusTextBox" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+    </Grid>
+</Window>

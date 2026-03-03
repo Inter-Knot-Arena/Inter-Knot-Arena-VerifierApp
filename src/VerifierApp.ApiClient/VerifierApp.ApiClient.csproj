@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>VerifierApp.ApiClient</AssemblyName>
+    <RootNamespace>VerifierApp.ApiClient</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\\VerifierApp.Core\\VerifierApp.Core.csproj" />
+  </ItemGroup>
+</Project>

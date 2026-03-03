@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>VerifierApp</AssemblyName>
+    <RootNamespace>VerifierApp.UI</RootNamespace>
+    <UseWPF>true</UseWPF>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\\VerifierApp.Core\\VerifierApp.Core.csproj" />
+    <ProjectReference Include="..\\VerifierApp.ApiClient\\VerifierApp.ApiClient.csproj" />
+    <ProjectReference Include="..\\VerifierApp.Auth\\VerifierApp.Auth.csproj" />
+    <ProjectReference Include="..\\VerifierApp.WorkerHost\\VerifierApp.WorkerHost.csproj" />
+  </ItemGroup>
+</Project>

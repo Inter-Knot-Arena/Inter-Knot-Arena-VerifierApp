@@ -1,0 +1,6 @@
+[submodule "external/OCR_Scan"]
+	path = external/OCR_Scan
+	url = https://github.com/Inter-Knot-Arena/Inter-Knot-Arena-OCR_Scan.git
+[submodule "external/CV"]
+	path = external/CV
+	url = https://github.com/Inter-Knot-Arena/Inter-Knot-Arena-CV.git
