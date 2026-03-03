@@ -19,6 +19,16 @@ namespace VerifierApp.UI;
 
 public partial class MainWindow : Window
 {
+    private enum AppUiState
+    {
+        Unauthenticated,
+        Authenticating,
+        Ready,
+        ScanRunning,
+        MonitorRunning,
+        Error
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly DpapiTokenStore _tokenStore = new();
@@ -27,6 +37,12 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _monitorCts;
     private BundledAssetPaths? _bundledAssets;
     private bool _isAuthenticated;
+    private bool _isBusy;
+    private bool _authInProgress;
+    private bool _scanRunning;
+    private bool _monitorRunning;
+    private bool _lastActionFailed;
+    private AppUiState _uiState = AppUiState.Unauthenticated;
 
     public MainWindow()
     {
@@ -45,15 +61,20 @@ public partial class MainWindow : Window
         var tokens = await _tokenStore.ReadAsync(CancellationToken.None);
         if (tokens is null)
         {
-            AppendStatus("No stored verifier token found.");
+            AppendStatus("AUTH_RESTORE_MISS", "No stored verifier token found.");
             return;
         }
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if (tokens.ExpiresAt > now + 5_000)
         {
+            if (string.IsNullOrWhiteSpace(tokens.UserId))
+            {
+                tokens = await ResolveUserIdAsync(tokens, CancellationToken.None);
+                await _tokenStore.SaveAsync(tokens, CancellationToken.None);
+            }
             SetAuthenticatedState(true, "Session restored from local store");
-            AppendStatus("Existing verifier session restored.");
+            AppendStatus("AUTH_RESTORE_OK", "Existing verifier session restored.");
             return;
         }
 
@@ -61,82 +82,132 @@ public partial class MainWindow : Window
         {
             await _tokenStore.ClearAsync(CancellationToken.None);
             SetAuthenticatedState(false, "Session expired. Please sign in again.");
-            AppendStatus("Stored session expired and was cleared.");
+            AppendStatus("AUTH_RESTORE_EXPIRED", "Stored session expired and was cleared.");
             return;
         }
 
         try
         {
             using var api = BuildApiClient();
-            var refreshed = await api.RefreshVerifierTokenAsync(tokens.RefreshToken, CancellationToken.None);
+            var refreshed = await api.RefreshVerifierTokenAsync(
+                tokens.RefreshToken,
+                tokens.UserId,
+                CancellationToken.None
+            );
+            if (string.IsNullOrWhiteSpace(refreshed.UserId))
+            {
+                refreshed = await ResolveUserIdAsync(refreshed, CancellationToken.None);
+            }
             await _tokenStore.SaveAsync(refreshed, CancellationToken.None);
             SetAuthenticatedState(true, "Session refreshed");
-            AppendStatus("Verifier token refreshed successfully.");
+            AppendStatus("AUTH_REFRESH_OK", "Verifier token refreshed successfully.");
         }
         catch (Exception ex)
         {
             await _tokenStore.ClearAsync(CancellationToken.None);
             SetAuthenticatedState(false, "Sign in required");
-            AppendStatus($"Failed to refresh stored token: {ex.Message}");
+            AppendStatus("AUTH_REFRESH_FAIL", $"Failed to refresh stored token: {ex.Message}");
         }
     }
 
     private async void EmailLoginButton_OnClick(object sender, RoutedEventArgs e)
     {
-        await RunUiActionAsync("Starting email sign-in...", async ct =>
+        _authInProgress = true;
+        RecomputeState();
+        try
         {
-            var email = EmailTextBox.Text.Trim();
-            var password = PasswordInput.Password;
-            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+            await RunUiActionAsync("Starting email sign-in...", async ct =>
             {
-                throw new InvalidOperationException("Email and password are required.");
-            }
+                var email = EmailTextBox.Text.Trim();
+                var password = PasswordInput.Password;
+                if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+                {
+                    throw new InvalidOperationException("Email and password are required.");
+                }
 
-            var tokens = await LoginWithEmailFlowAsync(email, password, ct);
-            await _tokenStore.SaveAsync(tokens, ct);
-            SetAuthenticatedState(true, "Signed in with email");
-            PasswordInput.Clear();
-            AppendStatus("Email login completed. Verifier features unlocked.");
-        });
+                var tokens = await LoginWithEmailFlowAsync(email, password, ct);
+                await _tokenStore.SaveAsync(tokens, ct);
+                SetAuthenticatedState(true, "Signed in with email");
+                PasswordInput.Clear();
+                AppendStatus("AUTH_EMAIL_OK", "Email login completed. Verifier features unlocked.");
+            });
+        }
+        finally
+        {
+            _authInProgress = false;
+            RecomputeState();
+        }
     }
 
     private async void GoogleLoginButton_OnClick(object sender, RoutedEventArgs e)
     {
-        await RunUiActionAsync("Starting Google OAuth login...", async ct =>
+        _authInProgress = true;
+        RecomputeState();
+        try
         {
-            var tokens = await LoginWithGoogleFlowAsync(ct);
-            await _tokenStore.SaveAsync(tokens, ct);
-            SetAuthenticatedState(true, "Signed in with Google");
-            AppendStatus("Google login completed. Verifier features unlocked.");
-        });
+            await RunUiActionAsync("Starting Google OAuth login...", async ct =>
+            {
+                var tokens = await LoginWithGoogleFlowAsync(ct);
+                await _tokenStore.SaveAsync(tokens, ct);
+                SetAuthenticatedState(true, "Signed in with Google");
+                AppendStatus("AUTH_GOOGLE_OK", "Google login completed. Verifier features unlocked.");
+            });
+        }
+        finally
+        {
+            _authInProgress = false;
+            RecomputeState();
+        }
     }
 
     private async void RosterScanButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (!_isAuthenticated)
         {
-            AppendStatus("Sign in first to run roster scan.");
+            AppendStatus("SCAN_AUTH_REQUIRED", "Sign in first to run roster scan.");
             return;
         }
 
-        await RunUiActionAsync("Running full roster scan...", async ct =>
+        if (_monitorRunning)
         {
-            await EnsureWorkerAsync();
-            var worker = _workerClient ?? throw new InvalidOperationException("Worker is not ready");
-            using var api = BuildApiClient();
-            var orchestrator = new ScanOrchestrator(api, worker, new NativeBridge());
-            var region = GetRegion();
-            var fullSync = FullSyncCheckBox.IsChecked == true;
-            var result = await orchestrator.ExecuteRosterScanAsync(region, fullSync, ct);
-            AppendStatus($"Roster import status: {result.Status}. {result.Message}");
-        });
+            AppendStatus("SCAN_BLOCKED_MONITOR", "Stop match monitor before running roster scan.");
+            return;
+        }
+
+        _scanRunning = true;
+        RecomputeState();
+        try
+        {
+            await RunUiActionAsync("Running full roster scan...", async ct =>
+            {
+                await EnsureWorkerAsync(ct);
+                var worker = _workerClient ?? throw new InvalidOperationException("Worker is not ready");
+                using var api = BuildApiClient();
+                var orchestrator = new ScanOrchestrator(api, worker, new NativeBridge());
+                var region = GetRegion();
+                var fullSync = FullSyncCheckBox.IsChecked == true;
+                var result = await orchestrator.ExecuteRosterScanAsync(region, fullSync, ct);
+                AppendStatus("SCAN_IMPORT_RESULT", $"Roster import status: {result.Status}. {result.Message}");
+            });
+        }
+        finally
+        {
+            _scanRunning = false;
+            RecomputeState();
+        }
     }
 
     private async void MatchMonitorButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (!_isAuthenticated)
         {
-            AppendStatus("Sign in first to run match monitor.");
+            AppendStatus("MONITOR_AUTH_REQUIRED", "Sign in first to run match monitor.");
+            return;
+        }
+
+        if (_scanRunning)
+        {
+            AppendStatus("MONITOR_BLOCKED_SCAN", "Wait for roster scan to finish before starting monitor.");
             return;
         }
 
@@ -145,23 +216,33 @@ public partial class MainWindow : Window
             _monitorCts.Cancel();
             _monitorCts.Dispose();
             _monitorCts = null;
+            _monitorRunning = false;
+            RecomputeState();
             MatchMonitorButton.Content = "Start Match Monitor";
-            AppendStatus("Match monitor stopped.");
+            AppendStatus("MONITOR_STOPPED", "Match monitor stopped.");
             return;
         }
 
         await RunUiActionAsync("Starting match monitor...", async ct =>
         {
-            await EnsureWorkerAsync();
+            await EnsureWorkerAsync(ct);
             var worker = _workerClient ?? throw new InvalidOperationException("Worker is not ready");
             var matchId = MatchIdTextBox.Text.Trim();
             if (string.IsNullOrWhiteSpace(matchId))
             {
                 throw new InvalidOperationException("Match ID is required.");
             }
+            var tokens = await _tokenStore.ReadAsync(ct)
+                         ?? throw new InvalidOperationException("Verifier session is missing. Sign in again.");
+            if (string.IsNullOrWhiteSpace(tokens.UserId))
+            {
+                throw new InvalidOperationException("User id is missing in verifier token. Sign in again.");
+            }
 
             _monitorCts = new CancellationTokenSource();
             var monitorToken = _monitorCts.Token;
+            _monitorRunning = true;
+            RecomputeState();
             MatchMonitorButton.Content = "Stop Match Monitor";
             _ = Task.Run(async () =>
             {
@@ -169,11 +250,13 @@ public partial class MainWindow : Window
                 {
                     using var api = BuildApiClient();
                     var monitor = new MatchMonitorService(api, worker);
-                    await monitor.RunMatchAsync(matchId, monitorToken);
+                    await monitor.RunMatchAsync(matchId, tokens.UserId, monitorToken);
                     await Dispatcher.InvokeAsync(() =>
                     {
+                        _monitorRunning = false;
+                        RecomputeState();
                         MatchMonitorButton.Content = "Start Match Monitor";
-                        AppendStatus("Match monitor completed.");
+                        AppendStatus("MONITOR_COMPLETED", "Match monitor completed.");
                     });
                 }
                 catch (OperationCanceledException)
@@ -182,7 +265,13 @@ public partial class MainWindow : Window
                 }
                 catch (Exception ex)
                 {
-                    await Dispatcher.InvokeAsync(() => AppendStatus($"Monitor error: {ex.Message}"));
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        _monitorRunning = false;
+                        _lastActionFailed = true;
+                        RecomputeState();
+                        AppendStatus("MONITOR_ERROR", $"Monitor error: {ex.Message}");
+                    });
                 }
             }, monitorToken);
         });
@@ -203,7 +292,7 @@ public partial class MainWindow : Window
                 }
                 catch (Exception ex)
                 {
-                    AppendStatus($"Token revoke warning: {ex.Message}");
+                    AppendStatus("AUTH_REVOKE_WARN", $"Token revoke warning: {ex.Message}");
                 }
             }
 
@@ -212,12 +301,14 @@ public partial class MainWindow : Window
                 _monitorCts.Cancel();
                 _monitorCts.Dispose();
                 _monitorCts = null;
+                _monitorRunning = false;
+                RecomputeState();
                 MatchMonitorButton.Content = "Start Match Monitor";
             }
 
             await _tokenStore.ClearAsync(ct);
             SetAuthenticatedState(false, "Signed out");
-            AppendStatus("Session cleared.");
+            AppendStatus("AUTH_LOGOUT_OK", "Session cleared.");
         });
     }
 
@@ -262,7 +353,7 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("OAuth state mismatch");
         }
 
-        return await api.ExchangeDeviceCodeAsync(
+        var tokens = await api.ExchangeDeviceCodeAsync(
             new VerifierDeviceExchangeRequest(
                 callback.RequestId,
                 callback.Code,
@@ -270,6 +361,7 @@ public partial class MainWindow : Window
             ),
             ct
         );
+        return await ResolveUserIdAsync(tokens, ct);
     }
 
     private async Task<VerifierTokens> LoginWithEmailFlowAsync(
@@ -342,10 +434,11 @@ public partial class MainWindow : Window
         }
 
         using var api = BuildApiClient();
-        return await api.ExchangeDeviceCodeAsync(
+        var tokens = await api.ExchangeDeviceCodeAsync(
             new VerifierDeviceExchangeRequest(callbackRequestId, callbackCode, codeVerifier),
             ct
         );
+        return await ResolveUserIdAsync(tokens, ct);
     }
 
     private static string? ReadQueryValue(Uri uri, string key)
@@ -376,7 +469,7 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private async Task EnsureWorkerAsync()
+    private async Task EnsureWorkerAsync(CancellationToken ct)
     {
         if (_workerClient is not null)
         {
@@ -387,13 +480,59 @@ public partial class MainWindow : Window
         NativeLibraryBootstrap.Initialize(_bundledAssets.NativeDllPath);
 
         _workerLauncher.Start(_bundledAssets.WorkerExePath);
-        await Task.Delay(1200);
-        _workerClient = new NamedPipeWorkerClient();
-        var healthy = await _workerClient.HealthAsync(CancellationToken.None);
-        if (!healthy)
+        Exception? lastError = null;
+        var startedAt = DateTimeOffset.UtcNow;
+
+        while (DateTimeOffset.UtcNow - startedAt < TimeSpan.FromSeconds(15))
         {
-            throw new InvalidOperationException("Worker health check failed.");
+            ct.ThrowIfCancellationRequested();
+            NamedPipeWorkerClient? candidate = null;
+            try
+            {
+                candidate = new NamedPipeWorkerClient(connectTimeoutMs: 1200);
+                var healthy = await candidate.HealthAsync(ct);
+                if (!healthy)
+                {
+                    throw new InvalidOperationException("Worker health endpoint returned false.");
+                }
+
+                _workerClient = candidate;
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                if (candidate is not null)
+                {
+                    await candidate.DisposeAsync();
+                }
+            }
+
+            await Task.Delay(250, ct);
         }
+
+        throw new InvalidOperationException("Worker startup failed after retries.", lastError);
+    }
+
+    private async Task<VerifierTokens> ResolveUserIdAsync(VerifierTokens tokens, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(tokens.UserId))
+        {
+            return tokens;
+        }
+
+        using var api = new InterKnotApiClient(
+            new HttpClient
+            {
+                BaseAddress = ParseApiBaseUri()
+            },
+            _ => Task.FromResult<string?>(tokens.AccessToken)
+        );
+        var user = await api.GetCurrentUserAsync(ct);
+        return tokens with
+        {
+            UserId = user.Id
+        };
     }
 
     private string GetRegion()
@@ -489,53 +628,101 @@ public partial class MainWindow : Window
 
     private async Task RunUiActionAsync(string startMessage, Func<CancellationToken, Task> action)
     {
-        AppendStatus(startMessage);
+        var correlationId = Guid.NewGuid().ToString("N")[..8];
+        AppendStatus("OP_START", startMessage, correlationId);
         SetBusyState(true);
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
             await action(cts.Token);
+            _lastActionFailed = false;
+            AppendStatus("OP_OK", "Operation completed.", correlationId);
         }
         catch (Exception ex)
         {
-            AppendStatus($"Error: {ex.Message}");
+            _lastActionFailed = true;
+            AppendStatus("OP_ERROR", ex.Message, correlationId);
         }
         finally
         {
             SetBusyState(false);
+            RecomputeState();
         }
     }
 
     private void SetBusyState(bool busy)
     {
-        ApiUrlTextBox.IsEnabled = !busy;
-        EmailTextBox.IsEnabled = !_isAuthenticated && !busy;
-        PasswordInput.IsEnabled = !_isAuthenticated && !busy;
-        EmailLoginButton.IsEnabled = !_isAuthenticated && !busy;
-        GoogleLoginButton.IsEnabled = !_isAuthenticated && !busy;
-
-        RosterScanButton.IsEnabled = _isAuthenticated && !busy;
-        MatchMonitorButton.IsEnabled = _isAuthenticated && !busy;
-        LogoutButton.IsEnabled = _isAuthenticated && !busy;
+        _isBusy = busy;
+        ApplyControlState();
     }
 
     private void SetAuthenticatedState(bool authenticated, string message)
     {
         _isAuthenticated = authenticated;
-        SessionBadgeText.Text = authenticated ? "Connected" : "Not connected";
-        SessionDot.Fill = authenticated
-            ? new SolidColorBrush(Color.FromRgb(34, 197, 94))
-            : new SolidColorBrush(Color.FromRgb(244, 63, 94));
-
         DisplayNameText.Text = message;
         LoginPanel.Visibility = authenticated ? Visibility.Collapsed : Visibility.Visible;
         DashboardPanel.Visibility = authenticated ? Visibility.Visible : Visibility.Collapsed;
-        SetBusyState(false);
+        RecomputeState();
+    }
+
+    private void RecomputeState()
+    {
+        _uiState = _authInProgress switch
+        {
+            true => AppUiState.Authenticating,
+            false when !_isAuthenticated => AppUiState.Unauthenticated,
+            false when _scanRunning => AppUiState.ScanRunning,
+            false when _monitorRunning => AppUiState.MonitorRunning,
+            false when _lastActionFailed => AppUiState.Error,
+            _ => AppUiState.Ready
+        };
+
+        SessionBadgeText.Text = _uiState switch
+        {
+            AppUiState.Authenticating => "Authenticating",
+            AppUiState.ScanRunning => "Scan running",
+            AppUiState.MonitorRunning => "Monitor running",
+            AppUiState.Error => "Error",
+            AppUiState.Ready => "Connected",
+            _ => "Not connected"
+        };
+
+        SessionDot.Fill = _uiState switch
+        {
+            AppUiState.Authenticating => new SolidColorBrush(Color.FromRgb(234, 179, 8)),
+            AppUiState.ScanRunning => new SolidColorBrush(Color.FromRgb(14, 165, 233)),
+            AppUiState.MonitorRunning => new SolidColorBrush(Color.FromRgb(59, 130, 246)),
+            AppUiState.Error => new SolidColorBrush(Color.FromRgb(244, 63, 94)),
+            AppUiState.Ready => new SolidColorBrush(Color.FromRgb(34, 197, 94)),
+            _ => new SolidColorBrush(Color.FromRgb(244, 63, 94))
+        };
+
+        ApplyControlState();
+    }
+
+    private void ApplyControlState()
+    {
+        var authInputEnabled = !_isAuthenticated && !_isBusy && !_scanRunning && !_monitorRunning;
+        ApiUrlTextBox.IsEnabled = !_isBusy && !_scanRunning && !_monitorRunning;
+        EmailTextBox.IsEnabled = authInputEnabled;
+        PasswordInput.IsEnabled = authInputEnabled;
+        EmailLoginButton.IsEnabled = authInputEnabled;
+        GoogleLoginButton.IsEnabled = authInputEnabled;
+
+        RosterScanButton.IsEnabled = _isAuthenticated && !_isBusy && !_monitorRunning && !_scanRunning;
+        MatchMonitorButton.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning;
+        LogoutButton.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning;
     }
 
     private void AppendStatus(string message)
     {
-        StatusTextBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
+        AppendStatus("INFO", message, null);
+    }
+
+    private void AppendStatus(string code, string message, string? correlationId = null)
+    {
+        var correlation = string.IsNullOrWhiteSpace(correlationId) ? "-" : correlationId;
+        StatusTextBox.AppendText($"[{DateTime.Now:HH:mm:ss}] [{code}] [{correlation}] {message}{Environment.NewLine}");
         StatusTextBox.ScrollToEnd();
     }
 
@@ -552,6 +739,7 @@ public partial class MainWindow : Window
     {
         _monitorCts?.Cancel();
         _monitorCts?.Dispose();
+        _monitorRunning = false;
         if (_workerClient is not null)
         {
             await _workerClient.DisposeAsync();

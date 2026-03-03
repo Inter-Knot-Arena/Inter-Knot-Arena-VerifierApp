@@ -26,6 +26,11 @@ public sealed class ScanOrchestrator
     )
     {
         var locked = _nativeBridge.TryLockInput();
+        if (!locked)
+        {
+            throw new InvalidOperationException("Scan aborted: OS input lock failed.");
+        }
+
         try
         {
             var scan = await _worker.RunRosterScanAsync(

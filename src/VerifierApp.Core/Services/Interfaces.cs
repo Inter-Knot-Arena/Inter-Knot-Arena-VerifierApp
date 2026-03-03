@@ -6,8 +6,9 @@ public interface IVerifierApiClient
 {
     Task<VerifierDeviceStartResponse> StartDeviceAuthAsync(VerifierDeviceStartRequest request, CancellationToken ct);
     Task<VerifierTokens> ExchangeDeviceCodeAsync(VerifierDeviceExchangeRequest request, CancellationToken ct);
-    Task<VerifierTokens> RefreshVerifierTokenAsync(string refreshToken, CancellationToken ct);
+    Task<VerifierTokens> RefreshVerifierTokenAsync(string refreshToken, string? currentUserId, CancellationToken ct);
     Task RevokeTokenAsync(string token, CancellationToken ct);
+    Task<VerifierAuthUser> GetCurrentUserAsync(CancellationToken ct);
     Task<RosterImportResult> ImportRosterAsync(RosterScanResult result, CancellationToken ct);
     Task<MatchVerifierSession> CreateMatchSessionAsync(string matchId, CancellationToken ct);
     Task SubmitEvidenceAsync(EvidenceSubmission submission, CancellationToken ct);

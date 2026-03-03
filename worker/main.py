@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import win32file
 import win32pipe
@@ -43,6 +43,20 @@ def dispatch(method: str, payload: Dict[str, Any]) -> Any:
     raise ValueError(f"Unknown method: {method}")
 
 
+def parse_message(raw: str) -> Tuple[str | None, str, Dict[str, Any]]:
+    message = json.loads(raw)
+    if not isinstance(message, dict):
+        raise ValueError("Request must be a JSON object.")
+
+    method = str(message.get("method", ""))
+    payload_raw = message.get("payload", {})
+    payload = dict(payload_raw) if isinstance(payload_raw, dict) else {}
+
+    request_id_raw = message.get("id")
+    request_id = str(request_id_raw) if request_id_raw is not None else None
+    return request_id, method, payload
+
+
 def serve(pipe_name: str) -> int:
     full_name = rf"\\.\pipe\{pipe_name}"
     while True:
@@ -62,14 +76,37 @@ def serve(pipe_name: str) -> int:
                 raw = read_line(pipe)
                 if raw is None:
                     break
+                request_id: str | None = None
                 try:
-                    message = json.loads(raw)
-                    method = str(message.get("method", ""))
-                    payload = dict(message.get("payload", {}))
+                    request_id, method, payload = parse_message(raw)
                     result = dispatch(method, payload)
-                    write_line(pipe, result)
+                    if request_id is None:
+                        write_line(pipe, result)
+                    else:
+                        write_line(
+                            pipe,
+                            {
+                                "id": request_id,
+                                "result": result,
+                                "error": None,
+                            },
+                        )
                 except Exception as exc:
-                    write_line(pipe, {"error": str(exc)})
+                    error_payload = {
+                        "code": "WORKER_DISPATCH_ERROR",
+                        "message": str(exc),
+                    }
+                    if request_id is None:
+                        write_line(pipe, {"error": error_payload})
+                    else:
+                        write_line(
+                            pipe,
+                            {
+                                "id": request_id,
+                                "result": None,
+                                "error": error_payload,
+                            },
+                        )
         finally:
             try:
                 win32file.CloseHandle(pipe)

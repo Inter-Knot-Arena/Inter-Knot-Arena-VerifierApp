@@ -20,6 +20,7 @@ public sealed record DetectionResult(
 
 public sealed record EvidenceSubmission(
     string MatchId,
+    string UserId,
     string Type,
     DetectionResult Detection,
     string VerifierSessionToken,

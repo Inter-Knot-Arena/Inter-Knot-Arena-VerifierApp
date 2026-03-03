@@ -22,5 +22,14 @@ public sealed record VerifierTokens(
     string AccessToken,
     string RefreshToken,
     long ExpiresAt,
-    long RefreshExpiresAt
+    long RefreshExpiresAt,
+    string? UserId
+);
+
+public sealed record VerifierAuthUser(
+    string Id,
+    string DisplayName,
+    string VerificationStatus,
+    string? Uid,
+    string? Region
 );

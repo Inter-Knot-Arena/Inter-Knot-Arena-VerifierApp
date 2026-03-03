@@ -56,11 +56,16 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
             response.AccessToken,
             response.RefreshToken,
             response.ExpiresAt,
-            response.RefreshExpiresAt
+            response.RefreshExpiresAt,
+            response.User?.Id
         );
     }
 
-    public async Task<VerifierTokens> RefreshVerifierTokenAsync(string refreshToken, CancellationToken ct)
+    public async Task<VerifierTokens> RefreshVerifierTokenAsync(
+        string refreshToken,
+        string? currentUserId,
+        CancellationToken ct
+    )
     {
         var response = await SendAsync<TokenRefreshResponse>(
             "/auth/verifier/token/refresh",
@@ -72,7 +77,8 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
             response.AccessToken,
             response.RefreshToken,
             response.ExpiresAt,
-            response.RefreshExpiresAt
+            response.RefreshExpiresAt,
+            currentUserId
         );
     }
 
@@ -83,6 +89,22 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
             includeBearer: false,
             ct
         );
+
+    public async Task<VerifierAuthUser> GetCurrentUserAsync(CancellationToken ct)
+    {
+        var payload = await SendGetAsync<VerifierAuthUserPayload>(
+            "/auth/me",
+            includeBearer: true,
+            ct
+        );
+        return new VerifierAuthUser(
+            payload.Id,
+            payload.DisplayName,
+            payload.Verification?.Status ?? "UNVERIFIED",
+            payload.Verification?.Uid,
+            payload.Verification?.Region
+        );
+    }
 
     public async Task<RosterImportResult> ImportRosterAsync(RosterScanResult result, CancellationToken ct)
     {
@@ -183,11 +205,40 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
                ?? throw new InvalidOperationException("API response is empty");
     }
 
+    private async Task<T> SendGetAsync<T>(
+        string path,
+        bool includeBearer,
+        CancellationToken ct
+    )
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        if (includeBearer)
+        {
+            var token = await _accessTokenProvider(ct);
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+        }
+
+        using var response = await _http.SendAsync(request, ct);
+        var content = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"API request failed ({(int)response.StatusCode}): {content}"
+            );
+        }
+        return JsonSerializer.Deserialize<T>(content, JsonOptions)
+               ?? throw new InvalidOperationException("API response is empty");
+    }
+
     private sealed record DeviceExchangeResponse(
         string AccessToken,
         string RefreshToken,
         long ExpiresAt,
-        long RefreshExpiresAt
+        long RefreshExpiresAt,
+        VerifierAuthUserPayload? User
     );
 
     private sealed record TokenRefreshResponse(
@@ -215,6 +266,18 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
         bool RequireInrunCheck,
         int PrecheckFrequencySec,
         int InrunFrequencySec
+    );
+
+    private sealed record VerifierAuthUserPayload(
+        string Id,
+        string DisplayName,
+        VerificationPayload? Verification
+    );
+
+    private sealed record VerificationPayload(
+        string Status,
+        string? Uid,
+        string? Region
     );
 
     public void Dispose()

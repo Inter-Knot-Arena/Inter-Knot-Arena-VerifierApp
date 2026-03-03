@@ -18,6 +18,7 @@ public static class VerifierSignatureService
         var payload = string.Join(
             ":",
             submission.MatchId,
+            submission.UserId,
             submission.Type,
             submission.Detection.Result,
             submission.Detection.FrameHash,
