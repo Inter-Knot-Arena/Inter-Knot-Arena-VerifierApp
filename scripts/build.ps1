@@ -25,12 +25,18 @@ $nativeBuildDir = Join-Path $root "native\\ika_native\\build\\release"
 $workerDir = Join-Path $root "worker"
 $bundleDir = Join-Path $root "src\\VerifierApp.UI\\Bundled"
 $workerExePath = Join-Path $workerDir "dist\\VerifierWorker.exe"
-$nativeDllPath = Join-Path $nativeBuildDir "ika_native.dll"
+$nativeDllPathCandidates = @(
+    (Join-Path $nativeBuildDir "ika_native.dll"),
+    (Join-Path $nativeBuildDir "$Configuration\\ika_native.dll"),
+    (Join-Path $nativeBuildDir "Release\\ika_native.dll")
+)
 $ocrRepoDir = Join-Path $root "external\\OCR_Scan"
 $cvRepoDir = Join-Path $root "external\\CV"
 $ocrBundlePath = Join-Path $bundleDir "ocr_scan_bundle.zip"
 $cvBundlePath = Join-Path $bundleDir "cv_bundle.zip"
 $bundleManifestPath = Join-Path $bundleDir "bundle.manifest.json"
+$inVsDevShell = -not [string]::IsNullOrWhiteSpace($env:VSCMD_VER)
+$cmakeGenerator = if ($inVsDevShell) { "Ninja" } else { "Visual Studio 18 2026" }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
@@ -80,11 +86,33 @@ function New-BundleArchive {
 }
 
 Write-Host "==> Building native module (ika_native.dll)"
+Write-Host "    CMake generator: $cmakeGenerator"
+if (Test-Path $nativeBuildDir) {
+    $cachePath = Join-Path $nativeBuildDir "CMakeCache.txt"
+    if (Test-Path $cachePath) {
+        $cacheLine = Select-String -Path $cachePath -Pattern "^CMAKE_GENERATOR:INTERNAL=(.+)$" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($cacheLine -and $cacheLine.Matches.Count -gt 0) {
+            $cachedGenerator = $cacheLine.Matches[0].Groups[1].Value
+            if (-not [string]::IsNullOrWhiteSpace($cachedGenerator) -and $cachedGenerator -ne $cmakeGenerator) {
+                Write-Host "    Generator changed ($cachedGenerator -> $cmakeGenerator), cleaning native build directory"
+                Remove-Item $nativeBuildDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
 Invoke-ExternalStep -Name "CMake configure" -Action {
-    cmake -S $nativeSourceDir -B $nativeBuildDir -G Ninja "-DCMAKE_BUILD_TYPE=$Configuration" -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+    if ($cmakeGenerator -eq "Ninja") {
+        cmake -S $nativeSourceDir -B $nativeBuildDir -G Ninja "-DCMAKE_BUILD_TYPE=$Configuration" -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+    } else {
+        cmake -S $nativeSourceDir -B $nativeBuildDir -G $cmakeGenerator -A x64 "-DCMAKE_BUILD_TYPE=$Configuration" -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+    }
 }
 Invoke-ExternalStep -Name "CMake build" -Action {
     cmake --build $nativeBuildDir --config $Configuration
+}
+$nativeDllPath = $nativeDllPathCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $nativeDllPath) {
+    throw "Native DLL not found after build. Checked: $($nativeDllPathCandidates -join ', ')"
 }
 
 Write-Host "==> Building python worker (VerifierWorker.exe)"
