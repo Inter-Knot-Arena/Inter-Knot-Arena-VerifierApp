@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $artifactRoot = Join-Path $root "artifacts\\publish\\$Runtime"
+$nativeSourceDir = Join-Path $root "native\\ika_native"
 $nativeBuildDir = Join-Path $root "native\\ika_native\\build\\release"
 $workerDir = Join-Path $root "worker"
 $bundleDir = Join-Path $root "src\\VerifierApp.UI\\Bundled"
@@ -15,8 +16,8 @@ $workerExePath = Join-Path $workerDir "dist\\VerifierWorker.exe"
 $nativeDllPath = Join-Path $nativeBuildDir "ika_native.dll"
 
 Write-Host "==> Building native module (ika_native.dll)"
-cmake --preset windows-msvc-release -S $root
-cmake --build --preset windows-msvc-release
+cmake -S $nativeSourceDir -B $nativeBuildDir -G Ninja -DCMAKE_BUILD_TYPE=$Configuration -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+cmake --build $nativeBuildDir --config $Configuration
 
 Write-Host "==> Building python worker (VerifierWorker.exe)"
 Push-Location $workerDir
