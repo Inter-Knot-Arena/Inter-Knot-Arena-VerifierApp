@@ -20,35 +20,50 @@ public static class BundledAssetManager
         var root = Path.Combine(baseDir, "InterKnotArena", "VerifierApp", "bundled", appVersion);
         Directory.CreateDirectory(root);
 
-        var workerPath = Path.Combine(root, "VerifierWorker.exe");
-        var nativePath = Path.Combine(root, "ika_native.dll");
-
-        ExtractResourceIfNeeded(resourceAssembly, WorkerResourceName, workerPath);
-        ExtractResourceIfNeeded(resourceAssembly, NativeResourceName, nativePath);
+        var workerPath = ResolveAssetPath(
+            resourceAssembly,
+            WorkerResourceName,
+            Path.Combine(root, "VerifierWorker.exe"),
+            Path.Combine(AppContext.BaseDirectory, "VerifierWorker.exe")
+        );
+        var nativePath = ResolveAssetPath(
+            resourceAssembly,
+            NativeResourceName,
+            Path.Combine(root, "ika_native.dll"),
+            Path.Combine(AppContext.BaseDirectory, "ika_native.dll")
+        );
 
         return new BundledAssetPaths(root, workerPath, nativePath);
     }
 
-    private static void ExtractResourceIfNeeded(
+    private static string ResolveAssetPath(
         Assembly assembly,
         string resourceName,
-        string outputPath
+        string outputPath,
+        string sidecarPath
     )
     {
         if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0)
         {
-            return;
+            return outputPath;
         }
 
         using var stream = assembly.GetManifestResourceStream(resourceName);
-        if (stream is null)
+        if (stream is not null)
         {
-            throw new InvalidOperationException(
-                $"Missing bundled resource '{resourceName}'. Run scripts/build.ps1 to stage bundle artifacts."
-            );
+            using var file = File.Open(outputPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+            stream.CopyTo(file);
+            return outputPath;
         }
 
-        using var file = File.Open(outputPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-        stream.CopyTo(file);
+        if (File.Exists(sidecarPath))
+        {
+            return sidecarPath;
+        }
+
+        throw new InvalidOperationException(
+            $"Missing bundled resource '{resourceName}' and sidecar '{Path.GetFileName(sidecarPath)}'. " +
+            "Run scripts/build.ps1 to stage and embed bundle artifacts."
+        );
     }
 }
