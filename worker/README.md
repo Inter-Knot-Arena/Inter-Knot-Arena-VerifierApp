@@ -9,6 +9,14 @@ Python worker process for OCR scan and match-time CV checks.
 - `cv.precheck`
 - `cv.inrun`
 
+`cv.precheck` / `cv.inrun` payload supports:
+
+- `expectedAgents: string[]`
+- `bannedAgents: string[]`
+- `detectedAgents: string[]` (optional debug override)
+- `captureScreen: boolean` (defaults to `true`)
+- `captureRegion: [x, y, width, height]` (optional override)
+
 Transport: JSON-RPC over Windows named pipe.
 
 Runtime dependencies:

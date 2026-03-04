@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-import hashlib
 import importlib
 import os
 import sys
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, Sequence, Tuple
+
+import cv2
+import numpy as np
+from PIL import ImageGrab
 
 
 def _candidate_roots() -> list[Path]:
@@ -52,14 +56,33 @@ def _bootstrap_paths() -> None:
 
 _bootstrap_paths()
 
-_AGENT_POOL = [
-    "agent_anby",
-    "agent_nicole",
-    "agent_ellen",
-    "agent_koleda",
-    "agent_lycaon",
-    "agent_vivian",
-]
+_DEFAULT_PRECHECK_REGION: dict[str, tuple[int, int, int, int]] = {
+    "1080p": (360, 250, 1200, 250),
+    "1440p": (480, 340, 1600, 320),
+}
+
+_DEFAULT_INRUN_REGION: dict[str, tuple[int, int, int, int]] = {
+    "1080p": (24, 180, 280, 620),
+    "1440p": (32, 240, 360, 820),
+}
+
+_ROSTER_UID_REGION: dict[str, tuple[int, int, int, int]] = {
+    "1080p": (1160, 930, 640, 130),
+    "1440p": (1540, 1220, 860, 180),
+}
+
+_ROSTER_AGENT_REGIONS: dict[str, list[tuple[int, int, int, int]]] = {
+    "1080p": [
+        (1180, 150, 520, 220),
+        (1180, 390, 520, 220),
+        (1180, 630, 520, 220),
+    ],
+    "1440p": [
+        (1560, 200, 700, 300),
+        (1560, 530, 700, 300),
+        (1560, 860, 700, 300),
+    ],
+}
 
 
 def _load_ocr_runtime():
@@ -73,12 +96,6 @@ def _load_cv_runtime():
     module = importlib.import_module("runtime.matcher")
     evaluate_fn = getattr(module, "evaluate_detection")
     return evaluate_fn
-
-
-def _seeded_agents(seed: str, limit: int = 3) -> list[str]:
-    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
-    values = sorted(_AGENT_POOL, key=lambda item: hashlib.md5(f"{digest}:{item}".encode("utf-8")).hexdigest())
-    return values[:max(1, min(limit, len(values)))]
 
 
 def _safe_list(values: Any) -> list[str]:
@@ -97,24 +114,74 @@ def _coerce_payload_locale(payload: Dict[str, Any]) -> str:
     return locale if locale in {"RU", "EN"} else "EN"
 
 
-def _default_roster_agents(session_id: str, full_sync: bool) -> list[dict[str, Any]]:
-    selected = _seeded_agents(session_id, limit=4 if full_sync else 3)
-    agents: list[dict[str, Any]] = []
-    for index, agent_id in enumerate(selected):
-        base_level = 50 + index * 2
-        agents.append(
-            {
-                "agentId": agent_id,
-                "level": base_level,
-                "mindscape": index % 3,
-                "weapon": {"weaponId": f"amp_{agent_id}", "level": base_level},
-                "discs": [
-                    {"slot": 1, "setId": "set_baseline", "level": 15},
-                    {"slot": 2, "setId": "set_baseline", "level": 15},
-                ],
-            }
-        )
-    return agents
+def _capture_screen_bgr(region: tuple[int, int, int, int] | None = None) -> np.ndarray | None:
+    try:
+        bbox = None
+        if region:
+            x, y, w, h = region
+            bbox = (x, y, x + w, y + h)
+        image = ImageGrab.grab(bbox=bbox, all_screens=True)
+        array = np.array(image)
+        if array.ndim < 3:
+            return None
+        if array.shape[2] == 4:
+            return cv2.cvtColor(array, cv2.COLOR_BGRA2BGR)
+        return cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
+    except Exception:
+        return None
+
+
+def _crop_with_box(frame: np.ndarray, box: tuple[int, int, int, int]) -> np.ndarray | None:
+    x, y, w, h = box
+    if w <= 0 or h <= 0:
+        return None
+    max_h, max_w = frame.shape[:2]
+    x0 = max(0, min(x, max_w - 1))
+    y0 = max(0, min(y, max_h - 1))
+    x1 = max(x0 + 1, min(x + w, max_w))
+    y1 = max(y0 + 1, min(y + h, max_h))
+    crop = frame[y0:y1, x0:x1]
+    if crop.size == 0:
+        return None
+    return crop
+
+
+def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str, Any]:
+    frame = _capture_screen_bgr()
+    if frame is None:
+        return {}
+
+    uid_box = _ROSTER_UID_REGION.get(resolution, _ROSTER_UID_REGION["1080p"])
+    icon_boxes = _ROSTER_AGENT_REGIONS.get(resolution, _ROSTER_AGENT_REGIONS["1080p"])
+    temp_root = Path(tempfile.gettempdir()) / "ika_verifier" / "roster" / session_id
+    temp_root.mkdir(parents=True, exist_ok=True)
+
+    payload: Dict[str, Any] = {}
+    anchors = {"profile": False, "agents": False, "equipment": False}
+
+    uid_crop = _crop_with_box(frame, uid_box)
+    if uid_crop is not None:
+        uid_path = temp_root / "uid.png"
+        if cv2.imwrite(str(uid_path), uid_crop):
+            payload["uidImagePath"] = str(uid_path)
+            anchors["profile"] = True
+
+    icon_paths: list[dict[str, str]] = []
+    for index, box in enumerate(icon_boxes):
+        crop = _crop_with_box(frame, box)
+        if crop is None:
+            continue
+        icon_path = temp_root / f"agent_icon_{index + 1}.png"
+        if cv2.imwrite(str(icon_path), crop):
+            icon_paths.append({"path": str(icon_path)})
+
+    if icon_paths:
+        payload["agentIconPaths"] = icon_paths
+        anchors["agents"] = len(icon_paths) >= 2
+        anchors["equipment"] = len(icon_paths) >= 2
+
+    payload["anchors"] = anchors
+    return payload
 
 
 def _build_roster_context(payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any], str, str]:
@@ -125,17 +192,17 @@ def _build_roster_context(payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     resolution = _coerce_payload_resolution(payload)
 
     anchors_raw = payload.get("anchors")
-    anchors = anchors_raw if isinstance(anchors_raw, dict) else {"profile": True, "agents": True, "equipment": True}
+    anchors = dict(anchors_raw) if isinstance(anchors_raw, dict) else {}
 
     uid_candidates = payload.get("uidCandidates")
     if not isinstance(uid_candidates, list):
-        uid_candidates = [hashlib.md5(session_id.encode("utf-8")).hexdigest()[:9]]
+        uid_candidates = []
 
     agents_raw = payload.get("agents")
     if not isinstance(agents_raw, list):
-        agents_raw = _default_roster_agents(session_id, full_sync=full_sync)
+        agents_raw = []
 
-    session_context = {
+    session_context: Dict[str, Any] = {
         "sessionId": session_id,
         "regionHint": region_hint,
         "region": payload.get("region"),
@@ -145,8 +212,24 @@ def _build_roster_context(payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
         "agents": agents_raw,
     }
 
+    if bool(payload.get("captureScreen", True)):
+        capture_payload = _prepare_roster_capture_assets(session_id=session_id, resolution=resolution)
+        if "uidImagePath" in capture_payload:
+            session_context["uidImagePath"] = capture_payload["uidImagePath"]
+        if "agentIconPaths" in capture_payload:
+            session_context["agentIconPaths"] = capture_payload["agentIconPaths"]
+        if not session_context["anchors"] and isinstance(capture_payload.get("anchors"), dict):
+            session_context["anchors"] = capture_payload["anchors"]
+
+    if not isinstance(session_context["anchors"], dict) or not session_context["anchors"]:
+        session_context["anchors"] = {"profile": False, "agents": False, "equipment": False}
+
     calibration_raw = payload.get("calibration")
-    calibration = calibration_raw if isinstance(calibration_raw, dict) else {"requiredAnchors": ["profile", "agents", "equipment"]}
+    calibration = (
+        calibration_raw
+        if isinstance(calibration_raw, dict)
+        else {"requiredAnchors": ["profile", "agents", "equipment"]}
+    )
     return session_context, calibration, locale, resolution
 
 
@@ -168,7 +251,7 @@ def run_ocr_scan(payload: Dict[str, Any]) -> Dict[str, Any]:
             "uid": "",
             "region": str(session_context.get("regionHint", "OTHER")).upper(),
             "fullSync": full_sync,
-            "modelVersion": "ocr-hybrid-v1.1",
+            "modelVersion": "ocr-hybrid-v1.2",
             "scanMeta": "hybrid_deterministic_pipeline",
             "confidenceByField": {"uid": 0.0, "region": 0.0, "agents": 0.0, "equipment": 0.0},
             "agents": [],
@@ -181,45 +264,87 @@ def run_ocr_scan(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
-def _resolve_detection_sets(payload: Dict[str, Any], mode: str) -> tuple[List[str], List[str], List[str]]:
+def _resolve_detection_sets(payload: Dict[str, Any]) -> tuple[list[str], list[str], list[str], list[str]]:
     expected = _safe_list(payload.get("expectedAgents"))
     detected = _safe_list(payload.get("detectedAgents"))
     history = _safe_list(payload.get("historyAgents"))
-    match_id = str(payload.get("matchId", "match"))
+    banned = _safe_list(payload.get("bannedAgents"))
+    return expected, detected, history, banned
 
-    if not expected:
-        expected = _seeded_agents(f"expected:{match_id}", 3)
-    if not detected:
-        if mode == "PRECHECK":
-            detected = expected
-        else:
-            detected = _seeded_agents(f"detected:{match_id}", 3)
-    return expected, detected, history
+
+def _parse_capture_region(raw: Any) -> tuple[int, int, int, int] | None:
+    if isinstance(raw, dict):
+        keys = ("x", "y", "width", "height")
+        if all(key in raw for key in keys):
+            try:
+                return (
+                    int(raw["x"]),
+                    int(raw["y"]),
+                    int(raw["width"]),
+                    int(raw["height"]),
+                )
+            except Exception:
+                return None
+
+    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)) and len(raw) == 4:
+        try:
+            return (int(raw[0]), int(raw[1]), int(raw[2]), int(raw[3]))
+        except Exception:
+            return None
+    return None
+
+
+def _default_cv_region(mode: str, resolution: str) -> tuple[int, int, int, int]:
+    if mode == "PRECHECK":
+        return _DEFAULT_PRECHECK_REGION.get(resolution, _DEFAULT_PRECHECK_REGION["1080p"])
+    return _DEFAULT_INRUN_REGION.get(resolution, _DEFAULT_INRUN_REGION["1080p"])
 
 
 def run_precheck(payload: Dict[str, Any]) -> Dict[str, Any]:
     evaluate_detection = _load_cv_runtime()
-    expected, detected, history = _resolve_detection_sets(payload, mode="PRECHECK")
+    expected, detected, history, banned = _resolve_detection_sets(payload)
+    resolution = _coerce_payload_resolution(payload)
+    capture_region = _parse_capture_region(payload.get("captureRegion")) or _default_cv_region(
+        mode="PRECHECK",
+        resolution=resolution,
+    )
+    capture_screen = bool(payload.get("captureScreen", True))
+
     return evaluate_detection(
         expected_agents=expected,
         detected_agents=detected,
+        banned_agents=banned,
         mode="PRECHECK",
         locale=_coerce_payload_locale(payload),
-        resolution=_coerce_payload_resolution(payload),
+        resolution=resolution,
         history_agents=history,
         frame_hash_hint=str(payload.get("frameHashHint", "")).strip() or None,
+        capture_region=capture_region if capture_screen else None,
+        orientation="horizontal",
+        capture_screen=capture_screen,
     )
 
 
 def run_inrun(payload: Dict[str, Any]) -> Dict[str, Any]:
     evaluate_detection = _load_cv_runtime()
-    expected, detected, history = _resolve_detection_sets(payload, mode="INRUN")
+    expected, detected, history, banned = _resolve_detection_sets(payload)
+    resolution = _coerce_payload_resolution(payload)
+    capture_region = _parse_capture_region(payload.get("captureRegion")) or _default_cv_region(
+        mode="INRUN",
+        resolution=resolution,
+    )
+    capture_screen = bool(payload.get("captureScreen", True))
+
     return evaluate_detection(
         expected_agents=expected,
         detected_agents=detected,
+        banned_agents=banned,
         mode="INRUN",
         locale=_coerce_payload_locale(payload),
-        resolution=_coerce_payload_resolution(payload),
+        resolution=resolution,
         history_agents=history,
         frame_hash_hint=str(payload.get("frameHashHint", "")).strip() or None,
+        capture_region=capture_region if capture_screen else None,
+        orientation="vertical",
+        capture_screen=capture_screen,
     )
