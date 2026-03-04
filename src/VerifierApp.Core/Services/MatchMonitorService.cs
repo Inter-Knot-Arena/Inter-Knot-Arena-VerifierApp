@@ -31,7 +31,15 @@ public sealed class MatchMonitorService
         var session = await _apiClient.CreateMatchSessionAsync(matchId, ct);
 
         var precheckHash = _nativeBridge.CaptureFrameHash();
-        var precheck = await _worker.RunPrecheckAsync(matchId, precheckHash, locale, resolution, ct);
+        var precheck = await _worker.RunPrecheckAsync(
+            matchId,
+            precheckHash,
+            session.ExpectedAgents,
+            session.BannedAgents,
+            locale,
+            resolution,
+            ct
+        );
         await SubmitAsync(matchId, userId, "PRECHECK", precheck, session.VerifierSessionToken, ct);
         evidenceObserver?.Invoke("PRECHECK", precheck);
 
@@ -44,7 +52,15 @@ public sealed class MatchMonitorService
         {
             await Task.Delay(TimeSpan.FromSeconds(session.InrunFrequencySec), ct);
             var inrunHash = _nativeBridge.CaptureFrameHash();
-            var inrun = await _worker.RunInrunAsync(matchId, inrunHash, locale, resolution, ct);
+            var inrun = await _worker.RunInrunAsync(
+                matchId,
+                inrunHash,
+                session.ExpectedAgents,
+                session.BannedAgents,
+                locale,
+                resolution,
+                ct
+            );
             await SubmitAsync(matchId, userId, "INRUN", inrun, session.VerifierSessionToken, ct);
             evidenceObserver?.Invoke("INRUN", inrun);
         }

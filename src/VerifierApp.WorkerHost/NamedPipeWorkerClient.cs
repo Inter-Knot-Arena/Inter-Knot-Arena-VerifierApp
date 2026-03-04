@@ -36,26 +36,30 @@ public sealed class NamedPipeWorkerClient : IWorkerClient, IAsyncDisposable
     public Task<DetectionResult> RunPrecheckAsync(
         string matchId,
         string? frameHashHint,
+        IReadOnlyList<string> expectedAgents,
+        IReadOnlyList<string> bannedAgents,
         string locale,
         string resolution,
         CancellationToken ct
     ) =>
         SendAsync<DetectionResult>(
             "cv.precheck",
-            new { matchId, frameHashHint, locale, resolution },
+            new { matchId, frameHashHint, expectedAgents, bannedAgents, locale, resolution },
             ct
         );
 
     public Task<DetectionResult> RunInrunAsync(
         string matchId,
         string? frameHashHint,
+        IReadOnlyList<string> expectedAgents,
+        IReadOnlyList<string> bannedAgents,
         string locale,
         string resolution,
         CancellationToken ct
     ) =>
         SendAsync<DetectionResult>(
             "cv.inrun",
-            new { matchId, frameHashHint, locale, resolution },
+            new { matchId, frameHashHint, expectedAgents, bannedAgents, locale, resolution },
             ct
         );
 

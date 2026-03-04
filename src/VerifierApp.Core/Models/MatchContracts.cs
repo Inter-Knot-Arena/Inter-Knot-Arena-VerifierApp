@@ -6,7 +6,9 @@ public sealed record MatchVerifierSession(
     long ExpiresAt,
     int PrecheckFrequencySec,
     int InrunFrequencySec,
-    bool RequireInrunCheck
+    bool RequireInrunCheck,
+    IReadOnlyList<string> ExpectedAgents,
+    IReadOnlyList<string> BannedAgents
 );
 
 public sealed record DetectionResult(

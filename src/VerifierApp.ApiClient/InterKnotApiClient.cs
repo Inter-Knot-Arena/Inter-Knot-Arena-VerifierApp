@@ -163,7 +163,9 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
             payload.ExpiresAt,
             payload.Ruleset.PrecheckFrequencySec,
             payload.Ruleset.InrunFrequencySec,
-            payload.Ruleset.RequireInrunCheck
+            payload.Ruleset.RequireInrunCheck,
+            payload.ExpectedAgents ?? Array.Empty<string>(),
+            payload.BannedAgents ?? Array.Empty<string>()
         );
     }
 
@@ -278,6 +280,8 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
         string MatchId,
         string VerifierSessionToken,
         long ExpiresAt,
+        IReadOnlyList<string>? ExpectedAgents,
+        IReadOnlyList<string>? BannedAgents,
         MatchSessionRuleset Ruleset
     );
 

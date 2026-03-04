@@ -20,6 +20,8 @@ public interface IWorkerClient
     Task<DetectionResult> RunPrecheckAsync(
         string matchId,
         string? frameHashHint,
+        IReadOnlyList<string> expectedAgents,
+        IReadOnlyList<string> bannedAgents,
         string locale,
         string resolution,
         CancellationToken ct
@@ -28,6 +30,8 @@ public interface IWorkerClient
     Task<DetectionResult> RunInrunAsync(
         string matchId,
         string? frameHashHint,
+        IReadOnlyList<string> expectedAgents,
+        IReadOnlyList<string> bannedAgents,
         string locale,
         string resolution,
         CancellationToken ct
