@@ -20,6 +20,7 @@ public sealed record DetectionResult(
     IReadOnlyDictionary<string, double>? ConfidenceByField,
     string FrameHash,
     string ModelVersion,
+    string DataVersion,
     IReadOnlyList<string>? LowConfReasons,
     double? TimingMs,
     string? Resolution,

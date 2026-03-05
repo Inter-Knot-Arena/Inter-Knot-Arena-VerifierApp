@@ -316,6 +316,7 @@ def run_ocr_scan(payload: Dict[str, Any]) -> Dict[str, Any]:
             "region": str(session_context.get("regionHint", "OTHER")).upper(),
             "fullSync": full_sync,
             "modelVersion": "ocr-hybrid-v1.2",
+            "dataVersion": "unknown",
             "scanMeta": "hybrid_deterministic_pipeline",
             "confidenceByField": {"uid": 0.0, "region": 0.0, "agents": 0.0, "equipment": 0.0},
             "agents": [],

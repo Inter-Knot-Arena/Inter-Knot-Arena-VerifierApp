@@ -54,6 +54,20 @@ Output:
 - Worker/native/OCR/CV bundles are embedded into `VerifierApp.exe` and extracted on first launch.
 - Release publish does not include `.pdb` files.
 
+## Worker smoke
+
+Quick smoke for bundled OCR/CV submodules:
+
+```powershell
+.\scripts\smoke_worker.ps1 -Locale EN -Resolution 1080p
+```
+
+Optional snapshot-based smoke:
+
+```powershell
+.\scripts\smoke_worker.ps1 -Locale RU -Resolution 1440p -CvPrecheckFrame "D:\shots\precheck.png" -CvInrunFrame "D:\shots\inrun.png" -UidImage "D:\shots\uid.png" -AgentIcons @("D:\shots\agent1.png","D:\shots\agent2.png","D:\shots\agent3.png")
+```
+
 ## Code signing
 
 ```powershell

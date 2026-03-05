@@ -35,6 +35,7 @@ public sealed record RosterScanResult(
     bool FullSync,
     IReadOnlyList<AgentScanResult> Agents,
     string ModelVersion,
+    string DataVersion,
     IReadOnlyDictionary<string, double>? ConfidenceByField,
     string ScanMeta,
     IReadOnlyList<string>? LowConfReasons,
