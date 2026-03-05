@@ -44,6 +44,7 @@ public interface INativeBridge
 {
     bool TryLockInput();
     void UnlockInput();
+    bool ExecuteScanScript(string script, int stepDelayMs);
     string CaptureFrameHash();
 }
 

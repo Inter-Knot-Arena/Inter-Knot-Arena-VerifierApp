@@ -1,7 +1,11 @@
 #include "ika_native.h"
 
 #include <array>
+#include <algorithm>
+#include <chrono>
+#include <cctype>
 #include <cstring>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -149,6 +153,98 @@ bool sha256_hex(const std::vector<unsigned char>& input, std::string& output) {
     return true;
 }
 
+std::string trim_copy(const std::string& value) {
+    size_t left = 0;
+    while (left < value.size() && std::isspace(static_cast<unsigned char>(value[left])) != 0) {
+        left += 1;
+    }
+    size_t right = value.size();
+    while (right > left && std::isspace(static_cast<unsigned char>(value[right - 1])) != 0) {
+        right -= 1;
+    }
+    return value.substr(left, right - left);
+}
+
+void uppercase_inplace(std::string& value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+}
+
+bool resolve_virtual_key(const std::string& token, WORD& key) {
+    if (token == "ESC" || token == "ESCAPE") {
+        key = VK_ESCAPE;
+        return true;
+    }
+    if (token == "TAB") {
+        key = VK_TAB;
+        return true;
+    }
+    if (token == "ENTER" || token == "RETURN") {
+        key = VK_RETURN;
+        return true;
+    }
+    if (token == "SPACE") {
+        key = VK_SPACE;
+        return true;
+    }
+    if (token == "LEFT") {
+        key = VK_LEFT;
+        return true;
+    }
+    if (token == "RIGHT") {
+        key = VK_RIGHT;
+        return true;
+    }
+    if (token == "UP") {
+        key = VK_UP;
+        return true;
+    }
+    if (token == "DOWN") {
+        key = VK_DOWN;
+        return true;
+    }
+    if (token == "F1") {
+        key = VK_F1;
+        return true;
+    }
+    if (token == "F2") {
+        key = VK_F2;
+        return true;
+    }
+    if (token == "F3") {
+        key = VK_F3;
+        return true;
+    }
+    if (token == "F4") {
+        key = VK_F4;
+        return true;
+    }
+    if (token == "I") {
+        key = 0x49;
+        return true;
+    }
+    if (token == "C") {
+        key = 0x43;
+        return true;
+    }
+    return false;
+}
+
+bool send_key_press(WORD key) {
+    INPUT inputs[2]{};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = key;
+    inputs[0].ki.dwFlags = 0;
+
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = key;
+    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+
+    const UINT sent = SendInput(2U, inputs, sizeof(INPUT));
+    return sent == 2U;
+}
+
 }  // namespace
 
 int ika_native_lock_input() {
@@ -177,4 +273,43 @@ int ika_native_capture_frame_hash(char* output_buffer, int output_buffer_length)
     std::strncpy(output_buffer, hash.c_str(), static_cast<size_t>(output_buffer_length - 1));
     output_buffer[output_buffer_length - 1] = '\0';
     return static_cast<int>(hash.size());
+}
+
+int ika_native_execute_scan_script(const char* script, int step_delay_ms) {
+    if (script == nullptr) {
+        return 0;
+    }
+
+    std::string sequence(script);
+    if (sequence.empty()) {
+        return 1;
+    }
+
+    const int delay_ms = step_delay_ms <= 0 ? 120 : step_delay_ms;
+    size_t cursor = 0;
+    while (cursor <= sequence.size()) {
+        size_t next = sequence.find(',', cursor);
+        std::string token = next == std::string::npos
+            ? sequence.substr(cursor)
+            : sequence.substr(cursor, next - cursor);
+        token = trim_copy(token);
+        uppercase_inplace(token);
+        if (!token.empty()) {
+            WORD key = 0;
+            if (!resolve_virtual_key(token, key)) {
+                return 0;
+            }
+            if (!send_key_press(key)) {
+                return 0;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+        }
+
+        if (next == std::string::npos) {
+            break;
+        }
+        cursor = next + 1;
+    }
+
+    return 1;
 }

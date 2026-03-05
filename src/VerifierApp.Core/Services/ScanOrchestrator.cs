@@ -35,6 +35,25 @@ public sealed class ScanOrchestrator
 
         try
         {
+            var scanScript = Environment.GetEnvironmentVariable("IKA_SCAN_SCRIPT");
+            if (string.IsNullOrWhiteSpace(scanScript))
+            {
+                scanScript = "ESC,TAB,TAB,ENTER";
+            }
+            var scanStepDelayRaw = Environment.GetEnvironmentVariable("IKA_SCAN_SCRIPT_STEP_DELAY_MS");
+            var scanStepDelayMs = 120;
+            if (!string.IsNullOrWhiteSpace(scanStepDelayRaw) &&
+                int.TryParse(scanStepDelayRaw, out var parsedDelay) &&
+                parsedDelay > 0)
+            {
+                scanStepDelayMs = parsedDelay;
+            }
+
+            if (!_nativeBridge.ExecuteScanScript(scanScript, scanStepDelayMs))
+            {
+                throw new InvalidOperationException("Scan aborted: native scan automation script failed.");
+            }
+
             var scan = await _worker.RunRosterScanAsync(
                 new RosterScanCommand(
                     SessionId: Guid.NewGuid().ToString("N"),

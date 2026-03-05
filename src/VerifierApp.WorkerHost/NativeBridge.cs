@@ -12,6 +12,17 @@ public sealed class NativeBridge : INativeBridge
         _ = IkaNativeUnlockInput();
     }
 
+    public bool ExecuteScanScript(string script, int stepDelayMs)
+    {
+        if (string.IsNullOrWhiteSpace(script))
+        {
+            return true;
+        }
+
+        var normalizedDelay = stepDelayMs <= 0 ? 120 : stepDelayMs;
+        return IkaNativeExecuteScanScript(script, normalizedDelay) == 1;
+    }
+
     public string CaptureFrameHash()
     {
         var buffer = new byte[65];
@@ -31,4 +42,7 @@ public sealed class NativeBridge : INativeBridge
 
     [DllImport("ika_native.dll", EntryPoint = "ika_native_capture_frame_hash", CallingConvention = CallingConvention.Cdecl)]
     private static extern int IkaNativeCaptureFrameHash(byte[] outputBuffer, int outputBufferLength);
+
+    [DllImport("ika_native.dll", EntryPoint = "ika_native_execute_scan_script", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    private static extern int IkaNativeExecuteScanScript(string script, int stepDelayMs);
 }

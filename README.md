@@ -31,6 +31,7 @@ Desktop verifier for Inter-Knot Arena with:
 7. Worker executes `ocr.scan`, `cv.precheck`, `cv.inrun`.
 8. Native module provides OS-level input lock and real desktop frame hash capture.
 9. Bundled OCR/CV zip packages are integrity-checked and extracted before worker startup.
+10. Before OCR scan, native scan script is executed (`ESC,TAB,TAB,ENTER` by default) under active input lock.
 
 ## Build prerequisites
 
@@ -67,3 +68,8 @@ Env vars required:
 
 - OCR package: `Inter-Knot-Arena-OCR_Scan`
 - CV package: `Inter-Knot-Arena-CV`
+
+## Optional runtime env vars
+
+- `IKA_SCAN_SCRIPT` - comma-separated key sequence for pre-scan navigation (`ESC,TAB,TAB,ENTER` by default).
+- `IKA_SCAN_SCRIPT_STEP_DELAY_MS` - delay between key presses for `IKA_SCAN_SCRIPT` (default `120`).
