@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private NamedPipeWorkerClient? _workerClient;
     private CancellationTokenSource? _monitorCts;
     private BundledAssetPaths? _bundledAssets;
+    private readonly SemaphoreSlim _tokenRefreshGate = new(1, 1);
     private bool _isAuthenticated;
     private bool _isBusy;
     private bool _authInProgress;
@@ -240,6 +241,9 @@ public partial class MainWindow : Window
             {
                 throw new InvalidOperationException("User id is missing in verifier token. Sign in again.");
             }
+            var locale = GetLocale();
+            var resolution = GetResolution();
+            var apiBaseUri = ParseApiBaseUri();
 
             _monitorCts = new CancellationTokenSource();
             var monitorToken = _monitorCts.Token;
@@ -250,13 +254,13 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    using var api = BuildApiClient();
+                    using var api = BuildApiClient(apiBaseUri);
                     var monitor = new MatchMonitorService(api, worker, new NativeBridge());
                     await monitor.RunMatchAsync(
                         matchId,
                         tokens.UserId,
-                        GetLocale(),
-                        GetResolution(),
+                        locale,
+                        resolution,
                         (phase, detection) =>
                         {
                             var marker = detection.Result switch
@@ -289,6 +293,7 @@ public partial class MainWindow : Window
                 }
                 catch (Exception ex)
                 {
+                    await ResetWorkerClientAsync();
                     await Dispatcher.InvokeAsync(() =>
                     {
                         _monitorRunning = false;
@@ -497,7 +502,21 @@ public partial class MainWindow : Window
     {
         if (_workerClient is not null)
         {
-            return;
+            try
+            {
+                if (await _workerClient.HealthAsync(ct))
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // stale client or dead worker process; restart below
+            }
+
+            await _workerClient.DisposeAsync();
+            _workerClient = null;
+            _workerLauncher.Dispose();
         }
 
         _bundledAssets ??= BundledAssetManager.EnsureExtracted(Assembly.GetExecutingAssembly());
@@ -541,6 +560,24 @@ public partial class MainWindow : Window
         }
 
         throw new InvalidOperationException("Worker startup failed after retries.", lastError);
+    }
+
+    private async Task ResetWorkerClientAsync()
+    {
+        var client = _workerClient;
+        _workerClient = null;
+        if (client is not null)
+        {
+            try
+            {
+                await client.DisposeAsync();
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+        _workerLauncher.Dispose();
     }
 
     private async Task<VerifierTokens> ResolveUserIdAsync(VerifierTokens tokens, CancellationToken ct)
@@ -601,17 +638,74 @@ public partial class MainWindow : Window
         return baseUri;
     }
 
-    private InterKnotApiClient BuildApiClient()
+    private InterKnotApiClient BuildApiClient(Uri? baseUriOverride = null)
     {
         var http = new HttpClient
         {
-            BaseAddress = ParseApiBaseUri()
+            BaseAddress = baseUriOverride ?? ParseApiBaseUri()
         };
-        return new InterKnotApiClient(http, async ct =>
+        return new InterKnotApiClient(http, GetAccessTokenForRequestAsync);
+    }
+
+    private async Task<string?> GetAccessTokenForRequestAsync(CancellationToken ct)
+    {
+        var tokens = await _tokenStore.ReadAsync(ct);
+        if (tokens is null)
         {
-            var tokens = await _tokenStore.ReadAsync(ct);
-            return tokens?.AccessToken;
-        });
+            return null;
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (tokens.ExpiresAt > now + 30_000)
+        {
+            return tokens.AccessToken;
+        }
+
+        await _tokenRefreshGate.WaitAsync(ct);
+        try
+        {
+            tokens = await _tokenStore.ReadAsync(ct);
+            if (tokens is null)
+            {
+                return null;
+            }
+
+            now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (tokens.ExpiresAt > now + 30_000)
+            {
+                return tokens.AccessToken;
+            }
+
+            if (tokens.RefreshExpiresAt <= now)
+            {
+                await _tokenStore.ClearAsync(ct);
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    SetAuthenticatedState(false, "Session expired. Please sign in again.");
+                    AppendStatus("AUTH_REFRESH_EXPIRED", "Verifier refresh token expired.");
+                });
+                return null;
+            }
+
+            var refreshHttp = new HttpClient
+            {
+                BaseAddress = await Dispatcher.InvokeAsync(ParseApiBaseUri)
+            };
+            using var refreshApi = new InterKnotApiClient(refreshHttp, _ => Task.FromResult<string?>(null));
+            var refreshed = await refreshApi.RefreshVerifierTokenAsync(tokens.RefreshToken, tokens.UserId, ct);
+            if (string.IsNullOrWhiteSpace(refreshed.UserId))
+            {
+                refreshed = await ResolveUserIdAsync(refreshed, ct);
+            }
+
+            await _tokenStore.SaveAsync(refreshed, ct);
+            await Dispatcher.InvokeAsync(() => AppendStatus("AUTH_REFRESH_OK", "Access token auto-refreshed."));
+            return refreshed.AccessToken;
+        }
+        finally
+        {
+            _tokenRefreshGate.Release();
+        }
     }
 
     private static async Task<HttpResponseMessage> PostJsonAsync(
@@ -795,6 +889,7 @@ public partial class MainWindow : Window
             _workerClient = null;
         }
         _workerLauncher.Dispose();
+        _tokenRefreshGate.Dispose();
         base.OnClosed(e);
     }
 }
