@@ -32,6 +32,7 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
             redirectUri = request.RedirectUri,
             state = request.State
         },
+        headers: null,
         includeBearer: false,
         ct
     );
@@ -49,6 +50,7 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
                 code = request.Code,
                 codeVerifier = request.CodeVerifier
             },
+            headers: null,
             includeBearer: false,
             ct
         );
@@ -70,6 +72,7 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
         var response = await SendAsync<TokenRefreshResponse>(
             "/auth/verifier/token/refresh",
             new { refreshToken },
+            headers: null,
             includeBearer: false,
             ct
         );
@@ -86,6 +89,7 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
         SendAsync<object>(
             "/auth/verifier/token/revoke",
             new { token },
+            headers: null,
             includeBearer: false,
             ct
         );
@@ -143,6 +147,7 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
                     confidence = agent.ConfidenceByField ?? new Dictionary<string, double>()
                 }).ToList()
             },
+            headers: null,
             includeBearer: true,
             ct
         );
@@ -154,6 +159,7 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
         var payload = await SendAsync<MatchSessionResponse>(
             $"/matches/{Uri.EscapeDataString(matchId)}/verifier/session",
             new { },
+            headers: null,
             includeBearer: true,
             ct
         );
@@ -174,6 +180,7 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
         var endpoint = submission.Type.Equals("PRECHECK", StringComparison.OrdinalIgnoreCase)
             ? $"/matches/{Uri.EscapeDataString(submission.MatchId)}/evidence/precheck"
             : $"/matches/{Uri.EscapeDataString(submission.MatchId)}/evidence/inrun";
+        var idempotencyKey = $"verifier:{submission.MatchId}:{submission.Type}:{submission.VerifierNonce}";
 
         return SendAsync<object>(
             endpoint,
@@ -187,6 +194,10 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
                 verifierNonce = submission.VerifierNonce,
                 verifierSignature = submission.VerifierSignature
             },
+            headers: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Idempotency-Key"] = idempotencyKey
+            },
             includeBearer: true,
             ct
         );
@@ -195,6 +206,7 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
     private async Task<T> SendAsync<T>(
         string path,
         object body,
+        IReadOnlyDictionary<string, string>? headers,
         bool includeBearer,
         CancellationToken ct
     )
@@ -205,6 +217,13 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
             Encoding.UTF8,
             "application/json"
         );
+        if (headers is not null)
+        {
+            foreach (var (key, value) in headers)
+            {
+                request.Headers.TryAddWithoutValidation(key, value);
+            }
+        }
         if (includeBearer)
         {
             var token = await _accessTokenProvider(ct);

@@ -100,6 +100,38 @@ public sealed class MatchMonitorService
         {
             VerifierSignature = VerifierSignatureService.BuildEvidenceSignature(submission)
         };
-        await _apiClient.SubmitEvidenceAsync(signed, ct);
+        const int maxAttempts = 3;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                await _apiClient.SubmitEvidenceAsync(signed, ct);
+                return;
+            }
+            catch (Exception ex) when (attempt < maxAttempts && IsRetryableEvidenceError(ex))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(300 * attempt), ct);
+            }
+        }
+    }
+
+    private static bool IsRetryableEvidenceError(Exception ex)
+    {
+        var message = ex.Message;
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return true;
+        }
+
+        var hardFailures = new[]
+        {
+            "INVALID_SIGNATURE",
+            "NONCE_REPLAY",
+            "VERIFIER_SESSION_EXPIRED",
+            "403",
+            "422"
+        };
+
+        return !hardFailures.Any(code => message.Contains(code, StringComparison.OrdinalIgnoreCase));
     }
 }
