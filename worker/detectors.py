@@ -4,12 +4,21 @@ import importlib
 import os
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Dict, Sequence, Tuple
 
 import cv2
 import numpy as np
 from PIL import ImageGrab
+
+try:
+    import dxcam  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    dxcam = None
+
+_DXCAM_LOCK = threading.Lock()
+_DXCAM_CAMERA = None
 
 
 def _candidate_roots() -> list[Path]:
@@ -115,6 +124,61 @@ def _coerce_payload_locale(payload: Dict[str, Any]) -> str:
 
 
 def _capture_screen_bgr(region: tuple[int, int, int, int] | None = None) -> np.ndarray | None:
+    frame = _capture_screen_dxgi(region)
+    if frame is not None:
+        return frame
+    return _capture_screen_pil(region)
+
+
+def _capture_screen_dxgi(region: tuple[int, int, int, int] | None = None) -> np.ndarray | None:
+    if dxcam is None:
+        return None
+
+    camera = _get_dxcam_camera()
+    if camera is None:
+        return None
+
+    capture_region = None
+    if region:
+        x, y, w, h = region
+        capture_region = (x, y, x + w, y + h)
+
+    try:
+        frame = camera.grab(region=capture_region)
+        if frame is None:
+            return None
+        if frame.ndim == 3 and frame.shape[2] == 4:
+            return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        return frame
+    except Exception:
+        return None
+
+
+def _get_dxcam_camera():
+    global _DXCAM_CAMERA
+    if _DXCAM_CAMERA is not None:
+        return _DXCAM_CAMERA
+
+    with _DXCAM_LOCK:
+        if _DXCAM_CAMERA is not None:
+            return _DXCAM_CAMERA
+        if dxcam is None:
+            return None
+
+        monitor_idx_raw = os.getenv("IKA_CAPTURE_OUTPUT_IDX", "0")
+        try:
+            monitor_idx = max(0, int(monitor_idx_raw))
+        except Exception:
+            monitor_idx = 0
+
+        try:
+            _DXCAM_CAMERA = dxcam.create(output_idx=monitor_idx, output_color="BGR")
+        except Exception:
+            _DXCAM_CAMERA = None
+        return _DXCAM_CAMERA
+
+
+def _capture_screen_pil(region: tuple[int, int, int, int] | None = None) -> np.ndarray | None:
     try:
         bbox = None
         if region:

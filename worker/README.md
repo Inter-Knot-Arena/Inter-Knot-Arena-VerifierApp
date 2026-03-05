@@ -24,6 +24,11 @@ Runtime dependencies:
 - OCR package path from `IKA_OCR_SCAN_ROOT` or bundle extraction directory.
 - CV package path from `IKA_CV_ROOT` or bundle extraction directory.
 - Bundle root is provided by host via `IKA_BUNDLE_ROOT`.
+- Capture backend: `dxcam` (DXGI) first for fullscreen support, `PIL.ImageGrab` fallback.
+
+Optional env vars:
+
+- `IKA_CAPTURE_OUTPUT_IDX` - monitor index for DXGI capture (`0` by default).
 
 ## Local build
 
