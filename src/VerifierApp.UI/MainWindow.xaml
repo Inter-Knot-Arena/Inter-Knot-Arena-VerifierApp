@@ -338,7 +338,7 @@
                             <Border Grid.Column="0" Margin="0,0,8,0" Style="{StaticResource PanelCardStyle}">
                                 <StackPanel>
                                     <TextBlock Text="Roster Sync" Foreground="#F7FBFF" FontSize="20" FontWeight="SemiBold"/>
-                                    <TextBlock Margin="0,2,0,12" Foreground="#A7B9D7" Text="Run full OCR account scan and import payload."/>
+                                    <TextBlock Margin="0,2,0,12" Foreground="#A7B9D7" Text="Run safe OCR import for the currently visible roster slice."/>
 
                                     <Grid>
                                         <Grid.ColumnDefinitions>
@@ -358,11 +358,17 @@
                                                   Grid.Column="2"
                                                   Margin="14,0,0,0"
                                                   VerticalAlignment="Center"
-                                                  Content="Full Sync"
-                                                  IsChecked="True"
+                                                  Content="Full Sync (temporarily disabled)"
+                                                  IsChecked="False"
+                                                  IsEnabled="False"
                                                   Foreground="#D1DDF2"
                                                   FontWeight="SemiBold"/>
                                     </Grid>
+
+                                    <TextBlock Margin="0,10,0,0"
+                                               TextWrapping="Wrap"
+                                               Foreground="#F0C88A"
+                                               Text="Full account overwrite is disabled until the worker can cover the whole roster instead of a single screen."/>
 
                                     <Grid Margin="0,10,0,0">
                                         <Grid.ColumnDefinitions>

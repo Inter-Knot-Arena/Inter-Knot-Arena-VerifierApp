@@ -27,6 +27,13 @@ public sealed class ScanOrchestrator
         CancellationToken ct
     )
     {
+        if (fullSync)
+        {
+            throw new InvalidOperationException(
+                "Full sync is temporarily disabled until multi-screen roster coverage is implemented."
+            );
+        }
+
         var locked = _nativeBridge.TryLockInput();
         if (!locked)
         {
