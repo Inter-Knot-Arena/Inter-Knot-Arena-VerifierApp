@@ -19,6 +19,7 @@ function Invoke-ExternalStep {
 }
 
 $root = Split-Path -Parent $PSScriptRoot
+$workspaceRoot = Split-Path -Parent $root
 $artifactRoot = Join-Path $root "artifacts\\publish\\$Runtime"
 $nativeSourceDir = Join-Path $root "native\\ika_native"
 $nativeBuildDir = Join-Path $root "native\\ika_native\\build\\release"
@@ -30,8 +31,6 @@ $nativeDllPathCandidates = @(
     (Join-Path $nativeBuildDir "$Configuration\\ika_native.dll"),
     (Join-Path $nativeBuildDir "Release\\ika_native.dll")
 )
-$ocrRepoDir = Join-Path $root "external\\OCR_Scan"
-$cvRepoDir = Join-Path $root "external\\CV"
 $ocrBundlePath = Join-Path $bundleDir "ocr_scan_bundle.zip"
 $cvBundlePath = Join-Path $bundleDir "cv_bundle.zip"
 $bundleManifestPath = Join-Path $bundleDir "bundle.manifest.json"
@@ -84,6 +83,39 @@ function New-BundleArchive {
         }
     }
 }
+
+function Resolve-BundleSourceDir {
+    param(
+        [string]$Name,
+        [string[]]$Candidates
+    )
+
+    foreach ($candidate in $Candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
+
+        if (Test-Path $candidate) {
+            $resolved = (Resolve-Path $candidate).Path
+            Write-Host "    Using $Name source: $resolved"
+            return $resolved
+        }
+    }
+
+    throw "$Name source directory not found. Checked: $($Candidates -join ', ')"
+}
+
+$ocrRepoDir = Resolve-BundleSourceDir -Name "OCR bundle" -Candidates @(
+    $env:IKA_OCR_REPO_DIR,
+    (Join-Path $workspaceRoot "Inter-Knot Arena OCR_Scan"),
+    (Join-Path $root "external\\OCR_Scan")
+)
+
+$cvRepoDir = Resolve-BundleSourceDir -Name "CV bundle" -Candidates @(
+    $env:IKA_CV_REPO_DIR,
+    (Join-Path $workspaceRoot "Inter-Knot Arena CV"),
+    (Join-Path $root "external\\CV")
+)
 
 Write-Host "==> Building native module (ika_native.dll)"
 Write-Host "    CMake generator: $cmakeGenerator"
