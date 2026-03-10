@@ -179,7 +179,7 @@ public partial class MainWindow : Window
         RecomputeState();
         try
         {
-            await RunUiActionAsync("Running roster scan...", async ct =>
+            await RunUiActionAsync("Running visible roster scan...", async ct =>
             {
                 await EnsureWorkerAsync(ct);
                 var worker = _workerClient ?? throw new InvalidOperationException("Worker is not ready");

@@ -178,7 +178,7 @@
                                            TextWrapping="Wrap"
                                            Foreground="#D0DBEF"
                                            FontSize="16"
-                                           Text="Authenticate once, then run automated roster import and anti-cheat match monitoring from a single desktop console."/>
+                                           Text="Authenticate once, then run visible-roster OCR import and anti-cheat match monitoring from a single desktop console."/>
 
                                 <Grid Grid.Row="2" Margin="0,22,0,0">
                                     <Grid.RowDefinitions>
@@ -210,8 +210,8 @@
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="02" Foreground="#79D2FF" FontSize="26" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,14,0"/>
                                             <StackPanel Grid.Column="1">
-                                                <TextBlock Text="Roster Full-Scan" Foreground="#F8FAFF" FontWeight="SemiBold" FontSize="16"/>
-                                                <TextBlock Text="OCR pipeline imports agents, disks, amplifiers and UID into backend." Foreground="#AFC1DD"/>
+                                                <TextBlock Text="Roster Snapshot Scan" Foreground="#F8FAFF" FontWeight="SemiBold" FontSize="16"/>
+                                                <TextBlock Text="Current OCR path imports UID and the roster slice visible on screen. Full account overwrite stays disabled." Foreground="#AFC1DD"/>
                                             </StackPanel>
                                         </Grid>
                                     </Border>
@@ -358,7 +358,7 @@
                                                   Grid.Column="2"
                                                   Margin="14,0,0,0"
                                                   VerticalAlignment="Center"
-                                                  Content="Full Sync (temporarily disabled)"
+                                                  Content="Full Sync (blocked)"
                                                   IsChecked="False"
                                                   IsEnabled="False"
                                                   Foreground="#D1DDF2"
@@ -368,7 +368,7 @@
                                     <TextBlock Margin="0,10,0,0"
                                                TextWrapping="Wrap"
                                                Foreground="#F0C88A"
-                                               Text="Full account overwrite is disabled until the worker can cover the whole roster instead of a single screen."/>
+                                               Text="Full account overwrite is blocked until the worker can scan every roster page instead of only the currently visible screen."/>
 
                                     <Grid Margin="0,10,0,0">
                                         <Grid.ColumnDefinitions>
@@ -393,7 +393,7 @@
                                     <Button x:Name="RosterScanButton"
                                             Margin="0,14,0,0"
                                             Style="{StaticResource PrimaryActionButtonStyle}"
-                                            Content="Run Roster Scan + Import"
+                                            Content="Run Visible Roster Scan + Import"
                                             Click="RosterScanButton_OnClick"/>
                                 </StackPanel>
                             </Border>

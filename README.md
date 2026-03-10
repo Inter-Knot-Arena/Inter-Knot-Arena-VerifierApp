@@ -4,7 +4,7 @@ Desktop verifier for Inter-Knot Arena with:
 
 - OAuth loopback login.
 - In-app sign-in via email/password or Google (browser).
-- Full OCR roster scan import (`POST /verifier/roster/import`).
+- Visible-roster OCR import (`POST /verifier/roster/import`); full-account sync is currently blocked.
 - Match precheck/in-run evidence submission.
 - Hybrid stack: WPF + Python worker + C++ native module.
 - Bundled OCR/CV runtime packages with SHA256 integrity checks.
@@ -33,6 +33,11 @@ Desktop verifier for Inter-Knot Arena with:
 9. Bundled OCR/CV zip packages are integrity-checked and extracted before worker startup.
 10. Before OCR scan, native scan script is executed (`ESC,TAB,TAB,ENTER` by default) under active input lock.
 11. Worker/CV capture path uses DXGI (`dxcam`) first for fullscreen compatibility, with safe fallback.
+
+## Current OCR limitation
+
+- The bundled OCR worker currently reads UID plus the roster slice visible on screen.
+- Full account overwrite remains disabled until the worker can navigate and capture every roster page reliably.
 
 ## Build prerequisites
 

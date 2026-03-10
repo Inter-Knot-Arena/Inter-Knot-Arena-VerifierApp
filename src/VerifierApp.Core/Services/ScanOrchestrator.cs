@@ -30,7 +30,7 @@ public sealed class ScanOrchestrator
         if (fullSync)
         {
             throw new InvalidOperationException(
-                "Full sync is temporarily disabled until multi-screen roster coverage is implemented."
+                "Full sync is blocked: the worker currently scans only the visible roster slice, not the full account."
             );
         }
 
