@@ -224,6 +224,17 @@ def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str
 
     payload: Dict[str, Any] = {}
     anchors = {"profile": False, "agents": False, "equipment": False}
+    screen_captures: list[dict[str, Any]] = []
+
+    roster_path = temp_root / "roster.png"
+    if cv2.imwrite(str(roster_path), frame):
+        screen_captures.append(
+            {
+                "role": "roster",
+                "path": str(roster_path),
+                "screenAlias": "captured_roster_screen",
+            }
+        )
 
     uid_crop = _crop_with_box(frame, uid_box)
     if uid_crop is not None:
@@ -246,6 +257,8 @@ def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str
         anchors["agents"] = len(icon_paths) >= 2
         anchors["equipment"] = len(icon_paths) >= 2
 
+    if screen_captures:
+        payload["screenCaptures"] = screen_captures
     payload["anchors"] = anchors
     return payload
 
@@ -277,6 +290,9 @@ def _build_roster_context(payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
         "uidCandidates": uid_candidates,
         "agents": agents_raw,
     }
+    raw_screen_captures = payload.get("screenCaptures")
+    if isinstance(raw_screen_captures, list) and raw_screen_captures:
+        session_context["screenCaptures"] = list(raw_screen_captures)
 
     if bool(payload.get("captureScreen", True)):
         capture_payload = _prepare_roster_capture_assets(session_id=session_id, resolution=resolution)
@@ -284,6 +300,13 @@ def _build_roster_context(payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
             session_context["uidImagePath"] = capture_payload["uidImagePath"]
         if "agentIconPaths" in capture_payload:
             session_context["agentIconPaths"] = capture_payload["agentIconPaths"]
+        captured_screen_captures = capture_payload.get("screenCaptures")
+        if isinstance(captured_screen_captures, list) and captured_screen_captures:
+            existing = session_context.get("screenCaptures")
+            if isinstance(existing, list):
+                session_context["screenCaptures"] = [*existing, *captured_screen_captures]
+            else:
+                session_context["screenCaptures"] = list(captured_screen_captures)
         if not session_context["anchors"] and isinstance(capture_payload.get("anchors"), dict):
             session_context["anchors"] = capture_payload["anchors"]
 
