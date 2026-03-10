@@ -120,31 +120,55 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
                 region = result.Region,
                 fullSync = result.FullSync,
                 modelVersion = result.ModelVersion,
+                dataVersion = result.DataVersion,
                 scanMeta = result.ScanMeta,
                 timingMs = result.TimingMs,
                 locale = result.Locale,
                 resolution = result.Resolution,
                 lowConfReasons = result.LowConfReasons ?? Array.Empty<string>(),
                 confidenceByField = result.ConfidenceByField ?? new Dictionary<string, double>(),
+                fieldSources = result.FieldSources ?? new Dictionary<string, string>(),
+                capabilities = result.Capabilities ?? new Dictionary<string, bool>(),
                 agents = result.Agents.Select(agent => new
                 {
                     agentId = agent.AgentId,
                     level = agent.Level,
+                    levelCap = agent.LevelCap,
                     mindscape = agent.Mindscape,
+                    mindscapeCap = agent.MindscapeCap,
+                    stats = agent.Stats ?? new Dictionary<string, double>(),
                     weapon = agent.Weapon is null
                         ? null
                         : new
                         {
                             weaponId = agent.Weapon.WeaponId,
-                            level = agent.Weapon.Level
+                            displayName = agent.Weapon.DisplayName,
+                            level = agent.Weapon.Level,
+                            levelCap = agent.Weapon.LevelCap,
+                            baseStatKey = agent.Weapon.BaseStatKey,
+                            baseStatValue = agent.Weapon.BaseStatValue,
+                            advancedStatKey = agent.Weapon.AdvancedStatKey,
+                            advancedStatValue = agent.Weapon.AdvancedStatValue
                         },
+                    weaponPresent = agent.WeaponPresent,
+                    discSlotOccupancy = agent.DiscSlotOccupancy ?? new Dictionary<string, bool>(),
                     discs = (agent.Discs ?? Array.Empty<DiscScanResult>()).Select(disc => new
                     {
                         slot = disc.Slot,
                         setId = disc.SetId,
-                        level = disc.Level
+                        displayName = disc.DisplayName,
+                        level = disc.Level,
+                        levelCap = disc.LevelCap,
+                        mainStatKey = disc.MainStatKey,
+                        mainStatValue = disc.MainStatValue,
+                        substats = (disc.Substats ?? Array.Empty<DiscSubstatScanResult>()).Select(substat => new
+                        {
+                            key = substat.Key,
+                            value = substat.Value
+                        }).ToList()
                     }).ToList(),
-                    confidence = agent.ConfidenceByField ?? new Dictionary<string, double>()
+                    confidenceByField = agent.ConfidenceByField ?? new Dictionary<string, double>(),
+                    fieldSources = agent.FieldSources ?? new Dictionary<string, string>()
                 }).ToList()
             },
             headers: null,

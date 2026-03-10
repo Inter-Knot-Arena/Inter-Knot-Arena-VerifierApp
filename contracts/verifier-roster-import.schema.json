@@ -8,10 +8,26 @@
     "region": { "type": "string", "enum": ["NA", "EU", "ASIA", "SEA", "OTHER"] },
     "fullSync": { "type": "boolean" },
     "modelVersion": { "type": "string" },
+    "dataVersion": { "type": "string" },
     "scanMeta": { "type": "string" },
+    "timingMs": { "type": "number", "minimum": 0 },
+    "resolution": { "type": "string" },
+    "locale": { "type": "string" },
+    "lowConfReasons": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
     "confidenceByField": {
       "type": "object",
       "additionalProperties": { "type": "number" }
+    },
+    "fieldSources": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
     },
     "agents": {
       "type": "array",
@@ -22,19 +38,75 @@
           "agentId": { "type": "string" },
           "owned": { "type": "boolean" },
           "level": { "type": "number" },
+          "levelCap": { "type": "number" },
           "dupes": { "type": "number" },
           "mindscape": { "type": "number" },
+          "mindscapeCap": { "type": "number" },
           "promotion": { "type": "number" },
           "talent": { "type": "number" },
           "core": { "type": "number" },
-          "weapon": { "type": "object" },
-          "discs": { "type": "array" },
+          "stats": {
+            "type": "object",
+            "additionalProperties": { "type": "number" }
+          },
+          "weapon": {
+            "type": "object",
+            "properties": {
+              "weaponId": { "type": "string" },
+              "displayName": { "type": "string" },
+              "level": { "type": "number" },
+              "levelCap": { "type": "number" },
+              "baseStatKey": { "type": "string" },
+              "baseStatValue": { "type": "number" },
+              "advancedStatKey": { "type": "string" },
+              "advancedStatValue": { "type": "number" }
+            },
+            "additionalProperties": true
+          },
+          "weaponPresent": { "type": "boolean" },
+          "discSlotOccupancy": {
+            "type": "object",
+            "additionalProperties": { "type": "boolean" }
+          },
+          "discs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "slot": { "type": "number" },
+                "setId": { "type": "string" },
+                "displayName": { "type": "string" },
+                "level": { "type": "number" },
+                "levelCap": { "type": "number" },
+                "mainStatKey": { "type": "string" },
+                "mainStatValue": { "type": "number" },
+                "substats": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": { "type": "string" },
+                      "value": { "type": "number" }
+                    },
+                    "additionalProperties": true
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          },
           "confidenceByField": {
             "type": "object",
             "additionalProperties": { "type": "number" }
+          },
+          "fieldSources": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
           }
-        }
+        },
+        "additionalProperties": true
       }
     }
-  }
+  },
+  "additionalProperties": true
 }
