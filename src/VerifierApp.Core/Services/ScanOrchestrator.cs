@@ -85,14 +85,24 @@ public sealed class ScanOrchestrator
                 throw new InvalidOperationException("Scan aborted: UID was not extracted.");
             }
 
+            var importResult = await _apiClient.ImportRosterAsync(scan, ct);
             if (scan.LowConfReasons is { Count: > 0 })
             {
-                throw new InvalidOperationException(
-                    $"Scan aborted: low confidence ({string.Join(", ", scan.LowConfReasons)})."
-                );
+                var warning = $"Imported with low confidence ({string.Join(", ", scan.LowConfReasons)}).";
+                var message = string.IsNullOrWhiteSpace(importResult.Message)
+                    ? warning
+                    : $"{importResult.Message} {warning}";
+                var status = string.Equals(importResult.Status, "OK", StringComparison.OrdinalIgnoreCase)
+                    ? "DEGRADED"
+                    : importResult.Status;
+                return importResult with
+                {
+                    Status = status,
+                    Message = message
+                };
             }
 
-            return await _apiClient.ImportRosterAsync(scan, ct);
+            return importResult;
         }
         finally
         {

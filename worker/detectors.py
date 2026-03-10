@@ -34,6 +34,8 @@ def _candidate_roots() -> list[Path]:
             roots.append(Path(value).resolve())
 
     here = Path(__file__).resolve()
+    roots.append(here.parents[2] / "Inter-Knot Arena OCR_Scan")
+    roots.append(here.parents[2] / "Inter-Knot Arena CV")
     roots.append(here.parents[1] / "external" / "OCR_Scan")
     roots.append(here.parents[1] / "external" / "CV")
     roots.append(here.parents[1] / "worker" / "ocr_scan")
@@ -56,7 +58,7 @@ def _candidate_roots() -> list[Path]:
 
 
 def _bootstrap_paths() -> None:
-    for root in _candidate_roots():
+    for root in reversed(_candidate_roots()):
         if root.exists():
             path = str(root)
             if path not in sys.path:
@@ -311,6 +313,15 @@ def run_ocr_scan(payload: Dict[str, Any]) -> Dict[str, Any]:
         result["fullSync"] = full_sync
         return result
     except scan_failure_cls as exc:
+        partial_result = getattr(exc, "partial_result", None)
+        if str(getattr(exc, "code", "")) == "LOW_CONFIDENCE" and isinstance(partial_result, dict):
+            recovered = dict(partial_result)
+            recovered["fullSync"] = full_sync
+            recovered["lowConfReasons"] = list(exc.low_conf_reasons)
+            recovered["resolution"] = recovered.get("resolution") or resolution
+            recovered["locale"] = recovered.get("locale") or locale
+            return recovered
+
         return {
             "uid": "",
             "region": str(session_context.get("regionHint", "OTHER")).upper(),
