@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using VerifierApp.Core.Models;
 
 namespace VerifierApp.Core.Services;
@@ -15,14 +16,21 @@ public static class VerifierSignatureService
 
     public static string BuildEvidenceSignature(EvidenceSubmission submission)
     {
-        var payload = string.Join(
-            ":",
-            submission.MatchId,
-            submission.UserId,
-            submission.Type,
-            submission.Detection.Result,
-            submission.Detection.FrameHash,
-            submission.VerifierNonce
+        var confidence = submission.Detection.Confidence
+            .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+            .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+        var payload = JsonSerializer.Serialize(
+            new
+            {
+                matchId = submission.MatchId,
+                userId = submission.UserId,
+                type = submission.Type,
+                result = submission.Detection.Result,
+                frameHash = submission.Detection.FrameHash ?? string.Empty,
+                detectedAgents = submission.Detection.DetectedAgents,
+                confidence,
+                nonce = submission.VerifierNonce
+            }
         );
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(submission.VerifierSessionToken));
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
