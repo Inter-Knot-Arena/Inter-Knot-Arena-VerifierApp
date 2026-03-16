@@ -5,7 +5,8 @@ param(
     [string]$CvPrecheckFrame = "",
     [string]$CvInrunFrame = "",
     [string]$UidImage = "",
-    [string[]]$AgentIcons = @()
+    [string[]]$AgentIcons = @(),
+    [string[]]$ScreenCaptures = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,7 +43,7 @@ if (-not (Test-Path $cvRoot)) {
 
 Write-Host "==> OCR smoke"
 $ocrArgs = @("scripts/run_scan.py")
-if ([string]::IsNullOrWhiteSpace($UidImage) -and $AgentIcons.Count -eq 0) {
+if ([string]::IsNullOrWhiteSpace($UidImage) -and $AgentIcons.Count -eq 0 -and $ScreenCaptures.Count -eq 0) {
     $ocrArgs += @("--seed", "smoke", "--region", "EU", "--full-sync")
 }
 else {
@@ -60,6 +61,11 @@ else {
     foreach ($iconPath in $AgentIcons) {
         if (-not [string]::IsNullOrWhiteSpace($iconPath)) {
             $ocrArgs += @("--agent-icon", $iconPath)
+        }
+    }
+    foreach ($capture in $ScreenCaptures) {
+        if (-not [string]::IsNullOrWhiteSpace($capture)) {
+            $ocrArgs += @("--screen-capture", $capture)
         }
     }
 }

@@ -1,12 +1,22 @@
 namespace VerifierApp.Core.Models;
 
+public sealed record ScreenCaptureInput(
+    string Role,
+    string Path,
+    string? AgentId = null,
+    int? SlotIndex = null,
+    string? ScreenAlias = null
+);
+
 public sealed record RosterScanCommand(
     string SessionId,
     string RegionHint,
     bool FullSync,
     string Locale = "EN",
     string Resolution = "1080p",
-    bool InputLockActive = true
+    bool InputLockActive = true,
+    bool CaptureScreen = true,
+    IReadOnlyList<ScreenCaptureInput>? ScreenCaptures = null
 );
 
 public sealed record AgentScanResult(
