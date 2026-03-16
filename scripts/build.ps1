@@ -107,14 +107,14 @@ function Resolve-BundleSourceDir {
 
 $ocrRepoDir = Resolve-BundleSourceDir -Name "OCR bundle" -Candidates @(
     $env:IKA_OCR_REPO_DIR,
-    (Join-Path $workspaceRoot "Inter-Knot Arena OCR_Scan"),
-    (Join-Path $root "external\\OCR_Scan")
+    (Join-Path $root "external\\OCR_Scan"),
+    (Join-Path $workspaceRoot "Inter-Knot Arena OCR_Scan")
 )
 
 $cvRepoDir = Resolve-BundleSourceDir -Name "CV bundle" -Candidates @(
     $env:IKA_CV_REPO_DIR,
-    (Join-Path $workspaceRoot "Inter-Knot Arena CV"),
-    (Join-Path $root "external\\CV")
+    (Join-Path $root "external\\CV"),
+    (Join-Path $workspaceRoot "Inter-Knot Arena CV")
 )
 
 Write-Host "==> Building native module (ika_native.dll)"

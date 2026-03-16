@@ -265,7 +265,7 @@ def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str
 
 def _build_roster_context(payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any], str, str]:
     session_id = str(payload.get("sessionId", "session"))
-    full_sync = bool(payload.get("fullSync", True))
+    full_sync = bool(payload.get("fullSync", False))
     region_hint = str(payload.get("regionHint", "OTHER"))
     locale = _coerce_payload_locale(payload)
     resolution = _coerce_payload_resolution(payload)
@@ -285,7 +285,7 @@ def _build_roster_context(payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
         "sessionId": session_id,
         "regionHint": region_hint,
         "region": payload.get("region"),
-        "inputLockActive": bool(payload.get("inputLockActive", True)),
+        "inputLockActive": bool(payload.get("inputLockActive", False)),
         "anchors": anchors,
         "uidCandidates": uid_candidates,
         "agents": agents_raw,
@@ -324,7 +324,7 @@ def _build_roster_context(payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
 
 def run_ocr_scan(payload: Dict[str, Any]) -> Dict[str, Any]:
     session_context, calibration, locale, resolution = _build_roster_context(payload)
-    full_sync = bool(payload.get("fullSync", True))
+    full_sync = bool(payload.get("fullSync", False))
     scan_roster, scan_failure_cls = _load_ocr_runtime()
     try:
         result = scan_roster(
