@@ -46,6 +46,7 @@ public interface INativeBridge
     void UnlockInput();
     bool ExecuteScanScript(string script, int stepDelayMs);
     string CaptureFrameHash();
+    bool CaptureDesktopPng(string outputPath);
 }
 
 public interface ITokenStore

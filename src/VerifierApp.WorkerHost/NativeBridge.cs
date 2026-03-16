@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Drawing;
+using System.Drawing.Imaging;
 using VerifierApp.Core.Services;
 
 namespace VerifierApp.WorkerHost;
@@ -34,6 +36,45 @@ public sealed class NativeBridge : INativeBridge
         return System.Text.Encoding.ASCII.GetString(buffer).TrimEnd('\0');
     }
 
+    public bool CaptureDesktopPng(string outputPath)
+    {
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var targetPath = Path.GetFullPath(outputPath);
+            var directory = Path.GetDirectoryName(targetPath);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return false;
+            }
+            Directory.CreateDirectory(directory);
+
+            var width = GetSystemMetrics(SystemMetricCxScreen);
+            var height = GetSystemMetrics(SystemMetricCyScreen);
+            if (width <= 0 || height <= 0)
+            {
+                return false;
+            }
+
+            using var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            using var graphics = Graphics.FromImage(bitmap);
+            graphics.CopyFromScreen(0, 0, 0, 0, bitmap.Size, CopyPixelOperation.SourceCopy);
+            bitmap.Save(targetPath, ImageFormat.Png);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private const int SystemMetricCxScreen = 0;
+    private const int SystemMetricCyScreen = 1;
+
     [DllImport("ika_native.dll", EntryPoint = "ika_native_lock_input", CallingConvention = CallingConvention.Cdecl)]
     private static extern int IkaNativeLockInput();
 
@@ -45,4 +86,7 @@ public sealed class NativeBridge : INativeBridge
 
     [DllImport("ika_native.dll", EntryPoint = "ika_native_execute_scan_script", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
     private static extern int IkaNativeExecuteScanScript(string script, int stepDelayMs);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern int GetSystemMetrics(int nIndex);
 }

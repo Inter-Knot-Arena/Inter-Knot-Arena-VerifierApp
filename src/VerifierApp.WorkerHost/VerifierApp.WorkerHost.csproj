@@ -2,6 +2,7 @@
   <PropertyGroup>
     <AssemblyName>VerifierApp.WorkerHost</AssemblyName>
     <RootNamespace>VerifierApp.WorkerHost</RootNamespace>
+    <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\\VerifierApp.Core\\VerifierApp.Core.csproj" />

@@ -94,3 +94,40 @@ Env vars required:
 - `IKA_SCAN_SCRIPT` - comma-separated key sequence for pre-scan navigation (`ESC,TAB,TAB,ENTER` by default).
 - `IKA_SCAN_SCRIPT_STEP_DELAY_MS` - delay between key presses for `IKA_SCAN_SCRIPT` (default `120`).
 - `IKA_CAPTURE_OUTPUT_IDX` - monitor index for fullscreen DXGI capture (`0` by default).
+- `IKA_EXTRA_SCREEN_CAPTURE_PLAN_JSON` - optional JSON array of visible-slice follow-up captures executed under active input lock.
+- `IKA_EXTRA_SCREEN_CAPTURE_PLAN_PATH` - optional path to the same JSON capture plan; used when the inline env var is empty.
+
+Example visible-slice capture plan:
+
+```json
+[
+  {
+    "role": "agent_detail",
+    "script": "ENTER",
+    "agentSlotIndex": 1,
+    "screenAlias": "agent_1_detail",
+    "stepDelayMs": 120,
+    "postDelayMs": 450,
+    "capture": true
+  },
+  {
+    "role": "",
+    "script": "ESC,DOWN",
+    "agentSlotIndex": 1,
+    "capture": false
+  },
+  {
+    "role": "agent_detail",
+    "script": "ENTER",
+    "agentSlotIndex": 2,
+    "screenAlias": "agent_2_detail",
+    "capture": true
+  }
+]
+```
+
+Notes:
+
+- `agentSlotIndex` is the 1-based visible roster slot, not a canonical `agentId`.
+- `slotIndex` is reserved for disc slot captures (`1..6`) on `disk_detail`.
+- `capture=false` executes navigation without saving a screenshot, which is useful for exit/next-agent steps.

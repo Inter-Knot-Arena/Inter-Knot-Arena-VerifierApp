@@ -5,6 +5,7 @@ public sealed record ScreenCaptureInput(
     string Path,
     string? AgentId = null,
     int? SlotIndex = null,
+    int? AgentSlotIndex = null,
     string? ScreenAlias = null
 );
 
