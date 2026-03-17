@@ -94,6 +94,9 @@ Env vars required:
 
 - `IKA_SCAN_SCRIPT` - comma-separated key sequence for pre-scan navigation (`ESC,TAB,TAB,ENTER` by default).
 - `IKA_SCAN_SCRIPT_STEP_DELAY_MS` - delay between key presses for `IKA_SCAN_SCRIPT` (default `120`).
+- `IKA_GAME_PROCESS_NAME` - process name used when auto-focusing the game before scan (`ZenlessZoneZero` by default).
+- `IKA_GAME_WINDOW_TITLE` - optional window-title hint used to prefer the correct game window.
+- `IKA_GAME_FOCUS_DELAY_MS` - extra wait after the game window is focused (default `250`).
 - `IKA_CAPTURE_OUTPUT_IDX` - monitor index for fullscreen DXGI capture (`0` by default).
 - `IKA_DEFAULT_OCR_CAPTURE_PLAN` - built-in OCR capture preset. Default is `VISIBLE_SLICE_AGENT_DETAIL_V1`; set to `OFF` to disable built-in follow-up captures.
 - `IKA_EXTRA_SCREEN_CAPTURE_PLAN_JSON` - optional JSON array of follow-up captures executed under active input lock.
@@ -103,7 +106,9 @@ Env vars required:
 - `IKA_FULL_SYNC_PAGE_ADVANCE_SCRIPT` - key script used to advance to the next roster page during full sync (default `DOWN`).
 - `IKA_FULL_SYNC_PAGE_NORMALIZE_SCRIPT` - optional key script used before each page capture to stabilize the cursor (default `UP,UP`).
 
-When no explicit `IKA_EXTRA_SCREEN_CAPTURE_PLAN_*` override is provided, the desktop app now uses the built-in `VISIBLE_SLICE_AGENT_DETAIL_V1` plan. It opens the three visible roster slots one by one, captures their `agent_detail` screens, and returns to the roster slice before the worker call.
+When no explicit `IKA_EXTRA_SCREEN_CAPTURE_PLAN_*` override is provided, the desktop app now uses the built-in `VISIBLE_SLICE_AGENT_DETAIL_V1` plan. It opens the three visible roster slots one by one, captures their `agent_detail` screens, and returns to the roster slice before the worker call. When richer follow-up captures are present, the host now prefers those `screenCaptures` over the legacy worker-side fullscreen crop path.
+
+`/verifier/roster/import` also accepts a verifier-linked UID fallback. If OCR cannot extract `uid` from the current screen but the authenticated verifier account is already linked to a UID, the API will use the linked UID instead of rejecting the import immediately.
 
 Example visible-slice capture plan:
 
