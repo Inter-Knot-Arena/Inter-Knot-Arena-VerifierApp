@@ -124,7 +124,7 @@ public sealed class ScanOrchestrator
         CancellationToken ct
     )
     {
-        var plan = RuntimeScreenCapturePlan.LoadFromEnvironment();
+        var plan = RuntimeScreenCapturePlan.LoadActivePlan();
         if (plan.Count == 0)
         {
             return [];
