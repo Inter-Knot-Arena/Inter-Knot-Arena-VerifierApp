@@ -106,6 +106,7 @@ Env vars required:
 - `IKA_GAME_FOCUS_DELAY_MS` - extra wait after the game window is focused (default `250`).
 - `IKA_GAME_CAPTURE_REFOCUS_DELAY_MS` - small extra wait after each per-step re-focus during live OCR automation (default `90`).
 - `IKA_ALLOW_SOFT_INPUT_LOCK` - optional fallback for unattended dev/live runs when Win32 `BlockInput()` is unavailable. The scan is marked degraded with `soft_input_lock_fallback`.
+- `IKA_KEY_SCRIPT_BACKEND` - optional key-script backend override. Set to `managed`/`sendkeys` to run key-only navigation scripts through WinForms `SendKeys` instead of native `SendInput`.
 - `IKA_CAPTURE_OUTPUT_IDX` - monitor index for fullscreen DXGI capture (`0` by default).
 - `IKA_CAPTURE_STEP_MAX_ATTEMPTS` - maximum attempts for each live OCR automation step before aborting (`2` by default).
 - `IKA_CAPTURE_STEP_RETRY_DELAY_MS` - delay between failed live OCR automation attempts (`180` by default).
@@ -124,7 +125,7 @@ When no explicit `IKA_EXTRA_SCREEN_CAPTURE_PLAN_*` override is provided, the des
 
 For live OCR bring-up there is also a richer opt-in preset, `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA`, which extends each visible slot with `equipment` and `amplifier_detail` captures before returning to the roster slice.
 
-Built-in and custom follow-up capture plans now re-focus the game window before every scripted step and can retry a step when the frame hash does not change after navigation. This is meant to reduce missed keypresses and stray focus loss during unattended live OCR runs.
+Built-in and custom follow-up capture plans now re-focus the game window before every scripted step and can retry a step when the frame hash does not change after navigation. The frame hash is now derived from the captured game window first, with a desktop fallback only when window capture fails. This is meant to reduce missed keypresses, false retries, and stray focus loss during unattended live OCR runs.
 
 When a pre-scan script or follow-up capture plan uses pointer commands (`CLICK:` / `DBLCLICK:`), the verifier now prefers soft input lock automatically. This avoids hard `BlockInput` getting in the way of synthetic mouse automation while still forcing the game window to stay focused.
 
@@ -134,7 +135,7 @@ For headless live OCR validation there is a dedicated console tool:
 dotnet run --project .\src\VerifierApp.LiveScan\VerifierApp.LiveScan.csproj -c Release -- --locale RU --resolution 1080p --out .\artifacts\live_scan\latest.json
 ```
 
-The tool defaults to `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA` plus `IKA_ALLOW_SOFT_INPUT_LOCK=1` for dev/live bring-up. To tune UI navigation without running OCR end-to-end, use probe mode:
+The tool defaults to `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA`, `IKA_ALLOW_SOFT_INPUT_LOCK=1`, and `IKA_KEY_SCRIPT_BACKEND=managed` for dev/live bring-up. To tune UI navigation without running OCR end-to-end, use probe mode:
 
 ```powershell
 dotnet run --project .\src\VerifierApp.LiveScan\VerifierApp.LiveScan.csproj -c Release -- --probe-script "CLICK:0.90:0.05" --probe-out-dir .\artifacts\probe\proxy_tab

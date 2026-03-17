@@ -2,6 +2,8 @@ using System.Runtime.InteropServices;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Windows.Forms;
 using VerifierApp.Core.Services;
 
 namespace VerifierApp.WorkerHost;
@@ -81,11 +83,36 @@ public sealed class NativeBridge : INativeBridge
         }
 
         var normalizedDelay = stepDelayMs <= 0 ? 120 : stepDelayMs;
+        if (!TryFocusGameWindow())
+        {
+            return false;
+        }
+
+        if (ShouldUseManagedKeyInput(script))
+        {
+            return ExecuteManagedKeyScript(script, normalizedDelay);
+        }
+
         return IkaNativeExecuteScanScript(script, normalizedDelay) == 1;
     }
 
     public string CaptureFrameHash()
     {
+        try
+        {
+            var target = FindGameProcess();
+            if (target is not null &&
+                target.MainWindowHandle != IntPtr.Zero &&
+                TryCaptureWindowHash(target.MainWindowHandle, out var gameWindowHash))
+            {
+                return gameWindowHash;
+            }
+        }
+        catch
+        {
+            // Fall through to native desktop hash fallback.
+        }
+
         var buffer = new byte[65];
         var result = IkaNativeCaptureFrameHash(buffer, buffer.Length);
         if (result <= 0)
@@ -208,6 +235,147 @@ public sealed class NativeBridge : INativeBridge
                 raw.Equals("on", StringComparison.OrdinalIgnoreCase));
     }
 
+    private bool ShouldUseManagedKeyInput(string script)
+    {
+        if (string.IsNullOrWhiteSpace(script) || !IsKeyOnlyScript(script))
+        {
+            return false;
+        }
+
+        if (_softInputLockActive)
+        {
+            return true;
+        }
+
+        var raw = Environment.GetEnvironmentVariable("IKA_KEY_SCRIPT_BACKEND");
+        return !string.IsNullOrWhiteSpace(raw) &&
+               (raw.Equals("managed", StringComparison.OrdinalIgnoreCase) ||
+                raw.Equals("sendkeys", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsKeyOnlyScript(string script)
+    {
+        foreach (var token in script.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (TryParseWaitToken(token, out _))
+            {
+                continue;
+            }
+
+            if (!TryResolveManagedSendKey(token, out _))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ExecuteManagedKeyScript(string script, int stepDelayMs)
+    {
+        try
+        {
+            foreach (var token in script.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (TryParseWaitToken(token, out var waitMs))
+                {
+                    Thread.Sleep(waitMs);
+                    continue;
+                }
+
+                if (!TryResolveManagedSendKey(token, out var sendKey))
+                {
+                    return false;
+                }
+
+                SendKeys.SendWait(sendKey);
+                Thread.Sleep(stepDelayMs);
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryParseWaitToken(string token, out int waitMs)
+    {
+        waitMs = 0;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return false;
+        }
+
+        const string waitPrefix = "WAIT:";
+        const string sleepPrefix = "SLEEP:";
+        var normalized = token.Trim();
+        if (normalized.StartsWith(waitPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return int.TryParse(normalized[waitPrefix.Length..], out waitMs) && waitMs >= 0;
+        }
+        if (normalized.StartsWith(sleepPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return int.TryParse(normalized[sleepPrefix.Length..], out waitMs) && waitMs >= 0;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveManagedSendKey(string token, out string sendKey)
+    {
+        sendKey = string.Empty;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return false;
+        }
+
+        switch (token.Trim().ToUpperInvariant())
+        {
+            case "ESC":
+            case "ESCAPE":
+                sendKey = "{ESC}";
+                return true;
+            case "TAB":
+                sendKey = "{TAB}";
+                return true;
+            case "ENTER":
+            case "RETURN":
+                sendKey = "{ENTER}";
+                return true;
+            case "SPACE":
+                sendKey = " ";
+                return true;
+            case "LEFT":
+                sendKey = "{LEFT}";
+                return true;
+            case "RIGHT":
+                sendKey = "{RIGHT}";
+                return true;
+            case "UP":
+                sendKey = "{UP}";
+                return true;
+            case "DOWN":
+                sendKey = "{DOWN}";
+                return true;
+            case "F1":
+            case "F2":
+            case "F3":
+            case "F4":
+                sendKey = "{" + token.Trim().ToUpperInvariant() + "}";
+                return true;
+            case "I":
+                sendKey = "i";
+                return true;
+            case "C":
+                sendKey = "c";
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private static bool CaptureWindowPng(IntPtr windowHandle, string outputPath)
     {
         if (windowHandle == IntPtr.Zero)
@@ -240,6 +408,49 @@ public sealed class NativeBridge : INativeBridge
         graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, bitmap.Size, CopyPixelOperation.SourceCopy);
         bitmap.Save(targetPath, ImageFormat.Png);
         return true;
+    }
+
+    private static bool TryCaptureWindowHash(IntPtr windowHandle, out string hash)
+    {
+        hash = string.Empty;
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (!GetWindowRect(windowHandle, out var rect))
+        {
+            return false;
+        }
+
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        using var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, bitmap.Size, CopyPixelOperation.SourceCopy);
+
+        var data = bitmap.LockBits(
+            new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.ReadOnly,
+            PixelFormat.Format32bppArgb
+        );
+        try
+        {
+            var byteCount = Math.Abs(data.Stride) * data.Height;
+            var buffer = new byte[byteCount];
+            Marshal.Copy(data.Scan0, buffer, 0, byteCount);
+            hash = Convert.ToHexString(SHA256.HashData(buffer)).ToLowerInvariant();
+            return true;
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
     }
 
     private static bool FocusWindow(IntPtr windowHandle)

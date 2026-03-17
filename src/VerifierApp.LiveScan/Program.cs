@@ -26,6 +26,7 @@ internal static class Program
             var repoRoot = ResolveRepoRoot(options.RepoRoot);
             EnsureProcessEnvironmentDefault("IKA_ALLOW_SOFT_INPUT_LOCK", "1");
             EnsureProcessEnvironmentDefault("IKA_DEFAULT_OCR_CAPTURE_PLAN", "VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA");
+            EnsureProcessEnvironmentDefault("IKA_KEY_SCRIPT_BACKEND", "managed");
             var nativeDll = ResolveNativeDll(repoRoot);
             PrependDirectoryToPath(Path.GetDirectoryName(nativeDll));
 

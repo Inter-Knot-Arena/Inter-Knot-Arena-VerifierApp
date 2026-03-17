@@ -52,12 +52,14 @@ if ($ProbePostDelayMs -ge 0) {
 
 $previousPreset = [Environment]::GetEnvironmentVariable("IKA_DEFAULT_OCR_CAPTURE_PLAN", "Process")
 $previousSoftLock = [Environment]::GetEnvironmentVariable("IKA_ALLOW_SOFT_INPUT_LOCK", "Process")
+$previousKeyBackend = [Environment]::GetEnvironmentVariable("IKA_KEY_SCRIPT_BACKEND", "Process")
 
 try {
     if (-not [string]::IsNullOrWhiteSpace($CapturePlanPreset)) {
         [Environment]::SetEnvironmentVariable("IKA_DEFAULT_OCR_CAPTURE_PLAN", $CapturePlanPreset, "Process")
     }
     [Environment]::SetEnvironmentVariable("IKA_ALLOW_SOFT_INPUT_LOCK", "1", "Process")
+    [Environment]::SetEnvironmentVariable("IKA_KEY_SCRIPT_BACKEND", "managed", "Process")
 
     Push-Location $repoRoot
     try {
@@ -73,4 +75,5 @@ try {
 finally {
     [Environment]::SetEnvironmentVariable("IKA_DEFAULT_OCR_CAPTURE_PLAN", $previousPreset, "Process")
     [Environment]::SetEnvironmentVariable("IKA_ALLOW_SOFT_INPUT_LOCK", $previousSoftLock, "Process")
+    [Environment]::SetEnvironmentVariable("IKA_KEY_SCRIPT_BACKEND", $previousKeyBackend, "Process")
 }
