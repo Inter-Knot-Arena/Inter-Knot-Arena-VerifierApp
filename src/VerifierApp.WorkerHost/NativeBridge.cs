@@ -10,28 +10,9 @@ public sealed class NativeBridge : INativeBridge
 {
     public bool TryFocusGameWindow()
     {
-        var processName = Environment.GetEnvironmentVariable("IKA_GAME_PROCESS_NAME");
-        if (string.IsNullOrWhiteSpace(processName))
-        {
-            processName = "ZenlessZoneZero";
-        }
-
-        var titleHint = Environment.GetEnvironmentVariable("IKA_GAME_WINDOW_TITLE");
-        var normalizedProcessName = Path.GetFileNameWithoutExtension(processName.Trim());
-        if (string.IsNullOrWhiteSpace(normalizedProcessName))
-        {
-            return false;
-        }
-
         try
         {
-            var target = Process
-                .GetProcessesByName(normalizedProcessName)
-                .Where(process => process.MainWindowHandle != IntPtr.Zero)
-                .OrderByDescending(process => MatchesWindowTitle(process, titleHint))
-                .ThenByDescending(process => process.StartTime)
-                .FirstOrDefault();
-
+            var target = FindGameProcess();
             if (target is null || target.MainWindowHandle == IntPtr.Zero)
             {
                 return false;
@@ -74,6 +55,29 @@ public sealed class NativeBridge : INativeBridge
         return System.Text.Encoding.ASCII.GetString(buffer).TrimEnd('\0');
     }
 
+    public bool CaptureGameWindowPng(string outputPath)
+    {
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var target = FindGameProcess();
+            if (target is null || target.MainWindowHandle == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return CaptureWindowPng(target.MainWindowHandle, outputPath);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public bool CaptureDesktopPng(string outputPath)
     {
         if (string.IsNullOrWhiteSpace(outputPath))
@@ -114,6 +118,29 @@ public sealed class NativeBridge : INativeBridge
     private const int SystemMetricCyScreen = 1;
     private const int ShowWindowRestore = 9;
 
+    private static Process? FindGameProcess()
+    {
+        var processName = Environment.GetEnvironmentVariable("IKA_GAME_PROCESS_NAME");
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            processName = "ZenlessZoneZero";
+        }
+
+        var titleHint = Environment.GetEnvironmentVariable("IKA_GAME_WINDOW_TITLE");
+        var normalizedProcessName = Path.GetFileNameWithoutExtension(processName.Trim());
+        if (string.IsNullOrWhiteSpace(normalizedProcessName))
+        {
+            return null;
+        }
+
+        return Process
+            .GetProcessesByName(normalizedProcessName)
+            .Where(process => process.MainWindowHandle != IntPtr.Zero)
+            .OrderByDescending(process => MatchesWindowTitle(process, titleHint))
+            .ThenByDescending(process => process.StartTime)
+            .FirstOrDefault();
+    }
+
     private static bool MatchesWindowTitle(Process process, string? titleHint)
     {
         if (string.IsNullOrWhiteSpace(titleHint))
@@ -129,6 +156,40 @@ public sealed class NativeBridge : INativeBridge
         {
             return false;
         }
+    }
+
+    private static bool CaptureWindowPng(IntPtr windowHandle, string outputPath)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var targetPath = Path.GetFullPath(outputPath);
+        var directory = Path.GetDirectoryName(targetPath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return false;
+        }
+        Directory.CreateDirectory(directory);
+
+        if (!GetWindowRect(windowHandle, out var rect))
+        {
+            return false;
+        }
+
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        using var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, bitmap.Size, CopyPixelOperation.SourceCopy);
+        bitmap.Save(targetPath, ImageFormat.Png);
+        return true;
     }
 
     private static bool FocusWindow(IntPtr windowHandle)
@@ -221,6 +282,9 @@ public sealed class NativeBridge : INativeBridge
     private static extern IntPtr SetFocus(IntPtr hWnd);
 
     [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out Rect lpRect);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
     [DllImport("user32.dll", ExactSpelling = true)]
@@ -228,4 +292,13 @@ public sealed class NativeBridge : INativeBridge
 
     [DllImport("kernel32.dll", ExactSpelling = true)]
     private static extern uint GetCurrentThreadId();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
 }

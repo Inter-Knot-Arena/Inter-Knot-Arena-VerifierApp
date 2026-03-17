@@ -47,6 +47,7 @@ public interface INativeBridge
     void UnlockInput();
     bool ExecuteScanScript(string script, int stepDelayMs);
     string CaptureFrameHash();
+    bool CaptureGameWindowPng(string outputPath);
     bool CaptureDesktopPng(string outputPath);
 }
 

@@ -422,10 +422,10 @@ public sealed class ScanOrchestrator
             var capturePageIndex = step.PageIndex ?? pageIndex;
             var fileName = BuildCaptureFileName(index + 1, step, capturePageIndex);
             var outputPath = Path.Combine(tempRoot, fileName);
-            if (!_nativeBridge.CaptureDesktopPng(outputPath))
+            if (!_nativeBridge.CaptureGameWindowPng(outputPath))
             {
                 throw new InvalidOperationException(
-                    $"Scan aborted: desktop capture failed for step {index + 1} ({step.Role})."
+                    $"Scan aborted: game-window capture failed for step {index + 1} ({step.Role})."
                 );
             }
 
