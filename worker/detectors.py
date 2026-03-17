@@ -77,11 +77,6 @@ _DEFAULT_INRUN_REGION: dict[str, tuple[int, int, int, int]] = {
     "1440p": (32, 240, 360, 820),
 }
 
-_ROSTER_UID_REGION: dict[str, tuple[int, int, int, int]] = {
-    "1080p": (1160, 930, 640, 130),
-    "1440p": (1540, 1220, 860, 180),
-}
-
 _ROSTER_AGENT_REGIONS = (
     (0.527, 0.014, 0.160, 0.194),
     (0.566, 0.222, 0.133, 0.208),
@@ -221,7 +216,6 @@ def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str
     if frame is None:
         return {}
 
-    uid_box = _ROSTER_UID_REGION.get(resolution, _ROSTER_UID_REGION["1080p"])
     temp_root = Path(tempfile.gettempdir()) / "ika_verifier" / "roster" / session_id
     temp_root.mkdir(parents=True, exist_ok=True)
 
@@ -239,13 +233,6 @@ def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str
             }
         )
 
-    uid_crop = _crop_with_box(frame, uid_box)
-    if uid_crop is not None:
-        uid_path = temp_root / "uid.png"
-        if cv2.imwrite(str(uid_path), uid_crop):
-            payload["uidImagePath"] = str(uid_path)
-            anchors["profile"] = True
-
     icon_paths: list[dict[str, str]] = []
     for index, box in enumerate(_ROSTER_AGENT_REGIONS):
         crop = _crop_with_fractional_box(frame, box)
@@ -259,7 +246,7 @@ def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str
         payload["agentIconPaths"] = icon_paths
         anchors["agents"] = len(icon_paths) >= 2
         anchors["equipment"] = len(icon_paths) >= 2
-    elif screen_captures:
+    if screen_captures:
         anchors["agents"] = True
         anchors["equipment"] = True
 
