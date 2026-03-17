@@ -8,6 +8,16 @@ namespace VerifierApp.WorkerHost;
 
 public sealed class NativeBridge : INativeBridge
 {
+    private bool _hardInputLockActive;
+    private bool _softInputLockActive;
+
+    public string CurrentInputLockMode =>
+        _hardInputLockActive
+            ? "hard"
+            : _softInputLockActive
+                ? "soft"
+                : "none";
+
     public bool TryFocusGameWindow()
     {
         try
@@ -26,11 +36,41 @@ public sealed class NativeBridge : INativeBridge
         }
     }
 
-    public bool TryLockInput() => IkaNativeLockInput() == 1;
+    public bool TryLockInput(bool preferSoft = false)
+    {
+        _hardInputLockActive = false;
+        _softInputLockActive = false;
+
+        if (preferSoft && IsSoftInputLockAllowed() && TryFocusGameWindow())
+        {
+            _softInputLockActive = true;
+            return true;
+        }
+
+        if (IkaNativeLockInput() == 1)
+        {
+            _hardInputLockActive = true;
+            return true;
+        }
+
+        if (!IsSoftInputLockAllowed() || !TryFocusGameWindow())
+        {
+            return false;
+        }
+
+        _softInputLockActive = true;
+        return true;
+    }
 
     public void UnlockInput()
     {
-        _ = IkaNativeUnlockInput();
+        if (_hardInputLockActive)
+        {
+            _ = IkaNativeUnlockInput();
+        }
+
+        _hardInputLockActive = false;
+        _softInputLockActive = false;
     }
 
     public bool ExecuteScanScript(string script, int stepDelayMs)
@@ -156,6 +196,16 @@ public sealed class NativeBridge : INativeBridge
         {
             return false;
         }
+    }
+
+    private static bool IsSoftInputLockAllowed()
+    {
+        var raw = Environment.GetEnvironmentVariable("IKA_ALLOW_SOFT_INPUT_LOCK");
+        return !string.IsNullOrWhiteSpace(raw) &&
+               (raw.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                raw.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                raw.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                raw.Equals("on", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool CaptureWindowPng(IntPtr windowHandle, string outputPath)

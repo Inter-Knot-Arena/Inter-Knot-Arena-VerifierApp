@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <thread>
 #include <string>
@@ -245,6 +246,160 @@ bool send_key_press(WORD key) {
     return sent == 2U;
 }
 
+bool parse_wait_command(const std::string& token, int& wait_ms) {
+    static constexpr std::array<const char*, 2> kPrefixes{ "WAIT:", "SLEEP:" };
+    for (const auto* prefix : kPrefixes) {
+        const auto prefix_len = std::strlen(prefix);
+        if (token.rfind(prefix, 0) != 0) {
+            continue;
+        }
+
+        const auto raw = trim_copy(token.substr(prefix_len));
+        if (raw.empty()) {
+            return false;
+        }
+
+        try {
+            const auto parsed = std::stoi(raw);
+            if (parsed < 0) {
+                return false;
+            }
+            wait_ms = parsed;
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    return false;
+}
+
+bool try_parse_coordinate_value(const std::string& raw, double& value) {
+    const auto trimmed = trim_copy(raw);
+    if (trimmed.empty()) {
+        return false;
+    }
+
+    try {
+        size_t consumed = 0;
+        value = std::stod(trimmed, &consumed);
+        return consumed == trimmed.size();
+    } catch (...) {
+        return false;
+    }
+}
+
+bool resolve_click_point(double x_value, double y_value, LONG& x, LONG& y) {
+    RECT rect{};
+    auto rect_left = 0L;
+    auto rect_top = 0L;
+    auto rect_width = static_cast<LONG>(GetSystemMetrics(SM_CXSCREEN));
+    auto rect_height = static_cast<LONG>(GetSystemMetrics(SM_CYSCREEN));
+
+    const auto foreground_window = GetForegroundWindow();
+    if (foreground_window != nullptr && GetWindowRect(foreground_window, &rect) != FALSE) {
+        rect_left = rect.left;
+        rect_top = rect.top;
+        rect_width = std::max<LONG>(0, rect.right - rect.left);
+        rect_height = std::max<LONG>(0, rect.bottom - rect.top);
+    }
+
+    if (rect_width <= 0 || rect_height <= 0) {
+        return false;
+    }
+
+    const auto use_relative = x_value >= 0.0 && x_value <= 1.0 && y_value >= 0.0 && y_value <= 1.0;
+    if (use_relative) {
+        x = rect_left + static_cast<LONG>(std::llround(x_value * static_cast<double>(rect_width - 1)));
+        y = rect_top + static_cast<LONG>(std::llround(y_value * static_cast<double>(rect_height - 1)));
+        return true;
+    }
+
+    x = static_cast<LONG>(std::llround(x_value));
+    y = static_cast<LONG>(std::llround(y_value));
+    return true;
+}
+
+bool parse_click_command(const std::string& token, LONG& x, LONG& y, int& click_count) {
+    std::string payload;
+    if (token.rfind("CLICK:", 0) == 0) {
+        payload = token.substr(std::strlen("CLICK:"));
+        click_count = 1;
+    } else if (token.rfind("DOUBLECLICK:", 0) == 0) {
+        payload = token.substr(std::strlen("DOUBLECLICK:"));
+        click_count = 2;
+    } else if (token.rfind("DBLCLICK:", 0) == 0) {
+        payload = token.substr(std::strlen("DBLCLICK:"));
+        click_count = 2;
+    } else {
+        return false;
+    }
+
+    const auto separator = payload.find(':');
+    if (separator == std::string::npos) {
+        return false;
+    }
+
+    double x_value = 0.0;
+    double y_value = 0.0;
+    if (!try_parse_coordinate_value(payload.substr(0, separator), x_value) ||
+        !try_parse_coordinate_value(payload.substr(separator + 1), y_value)) {
+        return false;
+    }
+
+    return resolve_click_point(x_value, y_value, x, y);
+}
+
+bool send_left_click(LONG x, LONG y, int click_count) {
+    if (click_count <= 0) {
+        return false;
+    }
+
+    const auto virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const auto virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const auto virtual_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const auto virtual_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (virtual_width <= 1 || virtual_height <= 1) {
+        return false;
+    }
+
+    const auto normalized_x = static_cast<LONG>(
+        std::llround(((static_cast<double>(x - virtual_left) * 65535.0) / static_cast<double>(virtual_width - 1)))
+    );
+    const auto normalized_y = static_cast<LONG>(
+        std::llround(((static_cast<double>(y - virtual_top) * 65535.0) / static_cast<double>(virtual_height - 1)))
+    );
+
+    INPUT move_input{};
+    move_input.type = INPUT_MOUSE;
+    move_input.mi.dx = normalized_x;
+    move_input.mi.dy = normalized_y;
+    move_input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+    if (SendInput(1U, &move_input, sizeof(INPUT)) != 1U) {
+        return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+
+    for (int index = 0; index < click_count; ++index) {
+        INPUT inputs[2]{};
+        inputs[0].type = INPUT_MOUSE;
+        inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        inputs[1].type = INPUT_MOUSE;
+        inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+
+        const auto sent = SendInput(2U, inputs, sizeof(INPUT));
+        if (sent != 2U) {
+            return false;
+        }
+
+        if (index + 1 < click_count) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        }
+    }
+
+    return true;
+}
+
 }  // namespace
 
 int ika_native_lock_input() {
@@ -295,14 +450,29 @@ int ika_native_execute_scan_script(const char* script, int step_delay_ms) {
         token = trim_copy(token);
         uppercase_inplace(token);
         if (!token.empty()) {
-            WORD key = 0;
-            if (!resolve_virtual_key(token, key)) {
-                return 0;
+            int wait_ms = 0;
+            if (parse_wait_command(token, wait_ms)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
+            } else {
+                LONG click_x = 0;
+                LONG click_y = 0;
+                int click_count = 0;
+                if (parse_click_command(token, click_x, click_y, click_count)) {
+                    if (!send_left_click(click_x, click_y, click_count)) {
+                        return 0;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+                } else {
+                    WORD key = 0;
+                    if (!resolve_virtual_key(token, key)) {
+                        return 0;
+                    }
+                    if (!send_key_press(key)) {
+                        return 0;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+                }
             }
-            if (!send_key_press(key)) {
-                return 0;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
         }
 
         if (next == std::string::npos) {

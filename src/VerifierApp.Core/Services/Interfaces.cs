@@ -42,8 +42,9 @@ public interface IWorkerClient
 
 public interface INativeBridge
 {
+    string CurrentInputLockMode { get; }
     bool TryFocusGameWindow();
-    bool TryLockInput();
+    bool TryLockInput(bool preferSoft = false);
     void UnlockInput();
     bool ExecuteScanScript(string script, int stepDelayMs);
     string CaptureFrameHash();

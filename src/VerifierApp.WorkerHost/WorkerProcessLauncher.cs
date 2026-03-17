@@ -9,6 +9,7 @@ public sealed class WorkerProcessLauncher : IDisposable
     public void Start(
         string workerExecutablePath,
         string pipeName = "ika_verifier_worker",
+        string? extraArguments = null,
         string? bundleRoot = null,
         string? ocrRoot = null,
         string? cvRoot = null
@@ -22,7 +23,9 @@ public sealed class WorkerProcessLauncher : IDisposable
         var startInfo = new ProcessStartInfo
         {
             FileName = workerExecutablePath,
-            Arguments = $"--pipe {pipeName}",
+            Arguments = string.IsNullOrWhiteSpace(extraArguments)
+                ? $"--pipe {pipeName}"
+                : $"{extraArguments} --pipe {pipeName}",
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = Path.GetDirectoryName(workerExecutablePath) ?? AppContext.BaseDirectory

@@ -4,7 +4,7 @@ namespace VerifierApp.Core.Services;
 
 public sealed class ScanOrchestrator
 {
-    private readonly IVerifierApiClient _apiClient;
+    private readonly IVerifierApiClient? _apiClient;
     private readonly IWorkerClient _worker;
     private readonly INativeBridge _nativeBridge;
 
@@ -19,7 +19,16 @@ public sealed class ScanOrchestrator
         _nativeBridge = nativeBridge;
     }
 
-    public async Task<RosterImportResult> ExecuteRosterScanAsync(
+    public ScanOrchestrator(
+        IWorkerClient worker,
+        INativeBridge nativeBridge
+    )
+    {
+        _worker = worker;
+        _nativeBridge = nativeBridge;
+    }
+
+    public async Task<RosterScanResult> CaptureRosterScanAsync(
         string regionHint,
         bool fullSync,
         string locale,
@@ -27,22 +36,7 @@ public sealed class ScanOrchestrator
         CancellationToken ct
     )
     {
-        if (!_nativeBridge.TryFocusGameWindow())
-        {
-            throw new InvalidOperationException("Scan aborted: game window could not be focused.");
-        }
-
-        var focusDelayMs = ReadNonNegativeIntFromEnvironment("IKA_GAME_FOCUS_DELAY_MS", 250);
-        if (focusDelayMs > 0)
-        {
-            await Task.Delay(focusDelayMs, ct);
-        }
-
-        var locked = _nativeBridge.TryLockInput();
-        if (!locked)
-        {
-            throw new InvalidOperationException("Scan aborted: OS input lock failed.");
-        }
+        await EnsureGameFocusedAsync(ct);
 
         try
         {
@@ -52,12 +46,23 @@ public sealed class ScanOrchestrator
             {
                 scanScript = "ESC,TAB,TAB,ENTER";
             }
+            var preferSoftInputLock = ScriptUsesPointerInput(scanScript) ||
+                                      RuntimeScreenCapturePlan.LoadActivePlan().Any(step => ScriptUsesPointerInput(step.Script));
             var scanStepDelayMs = ReadPositiveIntFromEnvironment("IKA_SCAN_SCRIPT_STEP_DELAY_MS", 120);
-
-            if (!_nativeBridge.ExecuteScanScript(scanScript, scanStepDelayMs))
+            var scanPostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_SCAN_SCRIPT_POST_DELAY_MS", 250);
+            var locked = _nativeBridge.TryLockInput(preferSoftInputLock);
+            if (!locked)
             {
-                throw new InvalidOperationException("Scan aborted: native scan automation script failed.");
+                throw new InvalidOperationException("Scan aborted: OS input lock failed.");
             }
+            await ExecuteGameScriptAsync(
+                scanScript,
+                scanStepDelayMs,
+                scanPostDelayMs,
+                expectFrameChange: true,
+                failureContext: "native scan automation script",
+                ct
+            );
 
             var scan = fullSync
                 ? await ExecuteFullRosterScanAsync(sessionId, regionHint, locale, resolution, ct)
@@ -70,32 +75,46 @@ public sealed class ScanOrchestrator
                 );
             }
 
-            var importResult = await _apiClient.ImportRosterAsync(scan, ct);
-            if (scan.LowConfReasons is { Count: > 0 })
-            {
-                var warning = $"Imported with low confidence ({string.Join(", ", scan.LowConfReasons)}).";
-                var message = string.IsNullOrWhiteSpace(importResult.Message)
-                    ? warning
-                    : $"{importResult.Message} {warning}";
-                var status = string.Equals(importResult.Status, "OK", StringComparison.OrdinalIgnoreCase)
-                    ? "DEGRADED"
-                    : importResult.Status;
-                return importResult with
-                {
-                    Status = status,
-                    Message = message
-                };
-            }
-
-            return importResult;
+            return AttachInputLockMetadata(scan);
         }
         finally
         {
-            if (locked)
-            {
-                _nativeBridge.UnlockInput();
-            }
+            _nativeBridge.UnlockInput();
         }
+    }
+
+    public async Task<RosterImportResult> ExecuteRosterScanAsync(
+        string regionHint,
+        bool fullSync,
+        string locale,
+        string resolution,
+        CancellationToken ct
+    )
+    {
+        var scan = await CaptureRosterScanAsync(regionHint, fullSync, locale, resolution, ct);
+        if (_apiClient is null)
+        {
+            throw new InvalidOperationException("Roster import client is not configured for this scan orchestrator.");
+        }
+
+        var importResult = await _apiClient.ImportRosterAsync(scan, ct);
+        if (scan.LowConfReasons is { Count: > 0 })
+        {
+            var warning = $"Imported with low confidence ({string.Join(", ", scan.LowConfReasons)}).";
+            var message = string.IsNullOrWhiteSpace(importResult.Message)
+                ? warning
+                : $"{importResult.Message} {warning}";
+            var status = string.Equals(importResult.Status, "OK", StringComparison.OrdinalIgnoreCase)
+                ? "DEGRADED"
+                : importResult.Status;
+            return importResult with
+            {
+                Status = status,
+                Message = message
+            };
+        }
+
+        return importResult;
     }
 
     private async Task<RosterScanResult> ExecuteVisibleSliceScanAsync(
@@ -111,14 +130,14 @@ public sealed class ScanOrchestrator
         var normalizePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_POST_DELAY_MS", 260);
         if (!string.IsNullOrWhiteSpace(normalizeScript))
         {
-            if (!_nativeBridge.ExecuteScanScript(normalizeScript, normalizeStepDelayMs))
-            {
-                throw new InvalidOperationException("Scan aborted: visible slice could not normalize roster cursor.");
-            }
-            if (normalizePostDelayMs > 0)
-            {
-                await Task.Delay(normalizePostDelayMs, ct);
-            }
+            await ExecuteGameScriptAsync(
+                normalizeScript,
+                normalizeStepDelayMs,
+                normalizePostDelayMs,
+                expectFrameChange: true,
+                failureContext: "visible slice normalize roster cursor",
+                ct
+            );
         }
 
         var runtimeCaptures = await CaptureExtraScreensAsync(sessionId, ct, pageIndex: 1);
@@ -155,14 +174,16 @@ public sealed class ScanOrchestrator
         if (initialUpSteps > 0)
         {
             var resetScript = BuildRepeatedKeyScript("UP", initialUpSteps);
-            if (!string.IsNullOrWhiteSpace(resetScript) &&
-                !_nativeBridge.ExecuteScanScript(resetScript, pageNormalizeStepDelayMs))
+            if (!string.IsNullOrWhiteSpace(resetScript))
             {
-                throw new InvalidOperationException("Scan aborted: full sync could not reset roster cursor.");
-            }
-            if (initialPostDelayMs > 0)
-            {
-                await Task.Delay(initialPostDelayMs, ct);
+                await ExecuteGameScriptAsync(
+                    resetScript,
+                    pageNormalizeStepDelayMs,
+                    initialPostDelayMs,
+                    expectFrameChange: true,
+                    failureContext: "full sync reset roster cursor",
+                    ct
+                );
             }
         }
 
@@ -188,16 +209,14 @@ public sealed class ScanOrchestrator
 
             if (pageIndex > 0 && !string.IsNullOrWhiteSpace(pageNormalizeScript))
             {
-                if (!_nativeBridge.ExecuteScanScript(pageNormalizeScript, pageNormalizeStepDelayMs))
-                {
-                    throw new InvalidOperationException(
-                        $"Scan aborted: full sync could not normalize roster cursor for page {pageIndex + 1}."
-                    );
-                }
-                if (pageNormalizePostDelayMs > 0)
-                {
-                    await Task.Delay(pageNormalizePostDelayMs, ct);
-                }
+                await ExecuteGameScriptAsync(
+                    pageNormalizeScript,
+                    pageNormalizeStepDelayMs,
+                    pageNormalizePostDelayMs,
+                    expectFrameChange: true,
+                    failureContext: $"full sync normalize roster cursor for page {pageIndex + 1}",
+                    ct
+                );
             }
 
             var pageSessionId = $"{sessionId}-page-{pageIndex + 1:D2}";
@@ -279,16 +298,14 @@ public sealed class ScanOrchestrator
                 lowConfReasons.Add("full_sync_page_advance_script_missing");
                 break;
             }
-            if (!_nativeBridge.ExecuteScanScript(pageAdvanceScript, pageAdvanceStepDelayMs))
-            {
-                throw new InvalidOperationException(
-                    $"Scan aborted: full sync could not advance after page {pageIndex + 1}."
-                );
-            }
-            if (pageAdvancePostDelayMs > 0)
-            {
-                await Task.Delay(pageAdvancePostDelayMs, ct);
-            }
+            await ExecuteGameScriptAsync(
+                pageAdvanceScript,
+                pageAdvanceStepDelayMs,
+                pageAdvancePostDelayMs,
+                expectFrameChange: true,
+                failureContext: $"full sync advance after page {pageIndex + 1}",
+                ct
+            );
         }
 
         if (mergedAgents.Count == 0)
@@ -416,19 +433,15 @@ public sealed class ScanOrchestrator
         for (var index = 0; index < plan.Count; index++)
         {
             ct.ThrowIfCancellationRequested();
-            await RefocusGameWindowAsync(ct, $"Scan aborted: game window could not be focused for extra capture step {index + 1}.");
             var step = plan[index];
-            if (!_nativeBridge.ExecuteScanScript(step.Script ?? string.Empty, step.StepDelayMs))
-            {
-                throw new InvalidOperationException(
-                    $"Scan aborted: extra capture automation failed for step {index + 1} ({step.Role})."
-                );
-            }
-
-            if (step.PostDelayMs > 0)
-            {
-                await Task.Delay(step.PostDelayMs, ct);
-            }
+            await ExecuteGameScriptAsync(
+                step.Script ?? string.Empty,
+                step.StepDelayMs,
+                step.PostDelayMs,
+                step.ExpectFrameChange,
+                $"extra capture step {index + 1} ({step.Role})",
+                ct
+            );
 
             if (!step.Capture)
             {
@@ -438,7 +451,10 @@ public sealed class ScanOrchestrator
             var capturePageIndex = step.PageIndex ?? pageIndex;
             var fileName = BuildCaptureFileName(index + 1, step, capturePageIndex);
             var outputPath = Path.Combine(tempRoot, fileName);
-            await RefocusGameWindowAsync(ct, $"Scan aborted: game window focus was lost before capturing step {index + 1}.");
+            await EnsureGameFocusedAsync(
+                ct,
+                $"Scan aborted: game window focus was lost before capturing step {index + 1}."
+            );
             if (!_nativeBridge.CaptureGameWindowPng(outputPath))
             {
                 throw new InvalidOperationException(
@@ -461,7 +477,10 @@ public sealed class ScanOrchestrator
         return captures;
     }
 
-    private async Task RefocusGameWindowAsync(CancellationToken ct, string failureMessage)
+    private async Task EnsureGameFocusedAsync(
+        CancellationToken ct,
+        string failureMessage = "Scan aborted: game window could not be focused."
+    )
     {
         if (!_nativeBridge.TryFocusGameWindow())
         {
@@ -473,6 +492,137 @@ public sealed class ScanOrchestrator
         {
             await Task.Delay(refocusDelayMs, ct);
         }
+    }
+
+    private async Task ExecuteGameScriptAsync(
+        string script,
+        int stepDelayMs,
+        int postDelayMs,
+        bool expectFrameChange,
+        string failureContext,
+        CancellationToken ct
+    )
+    {
+        if (string.IsNullOrWhiteSpace(script))
+        {
+            return;
+        }
+
+        var maxAttempts = ReadPositiveIntFromEnvironment("IKA_CAPTURE_STEP_MAX_ATTEMPTS", 2);
+        var retryDelayMs = ReadNonNegativeIntFromEnvironment("IKA_CAPTURE_STEP_RETRY_DELAY_MS", 180);
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            await EnsureGameFocusedAsync(ct);
+            var beforeHash = expectFrameChange ? NormalizeFrameHash(_nativeBridge.CaptureFrameHash()) : string.Empty;
+
+            if (!_nativeBridge.ExecuteScanScript(script, stepDelayMs))
+            {
+                if (attempt == maxAttempts)
+                {
+                    throw new InvalidOperationException($"Scan aborted: {failureContext} failed.");
+                }
+
+                if (retryDelayMs > 0)
+                {
+                    await Task.Delay(retryDelayMs, ct);
+                }
+                continue;
+            }
+
+            if (postDelayMs > 0)
+            {
+                await Task.Delay(postDelayMs, ct);
+            }
+
+            if (!expectFrameChange)
+            {
+                return;
+            }
+
+            var afterHash = NormalizeFrameHash(_nativeBridge.CaptureFrameHash());
+            if (string.IsNullOrWhiteSpace(beforeHash) ||
+                string.IsNullOrWhiteSpace(afterHash) ||
+                !string.Equals(beforeHash, afterHash, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (attempt == maxAttempts)
+            {
+                throw new InvalidOperationException(
+                    $"Scan aborted: {failureContext} did not change the game frame."
+                );
+            }
+
+            if (retryDelayMs > 0)
+            {
+                await Task.Delay(retryDelayMs, ct);
+            }
+        }
+    }
+
+    private static string NormalizeFrameHash(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+    private static bool ScriptUsesPointerInput(string? script)
+    {
+        if (string.IsNullOrWhiteSpace(script))
+        {
+            return false;
+        }
+
+        return script.Contains("CLICK:", StringComparison.OrdinalIgnoreCase) ||
+               script.Contains("DOUBLECLICK:", StringComparison.OrdinalIgnoreCase) ||
+               script.Contains("DBLCLICK:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private RosterScanResult AttachInputLockMetadata(RosterScanResult scan)
+    {
+        var capabilities = scan.Capabilities is { Count: > 0 }
+            ? new Dictionary<string, bool>(scan.Capabilities, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var lowConfReasons = scan.LowConfReasons is { Count: > 0 }
+            ? new List<string>(scan.LowConfReasons)
+            : new List<string>();
+        var scanMeta = scan.ScanMeta;
+        var mode = _nativeBridge.CurrentInputLockMode;
+
+        capabilities["hardInputLockActive"] = string.Equals(mode, "hard", StringComparison.OrdinalIgnoreCase);
+        capabilities["softInputLockActive"] = string.Equals(mode, "soft", StringComparison.OrdinalIgnoreCase);
+
+        if (string.Equals(mode, "soft", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!lowConfReasons.Contains("soft_input_lock_fallback", StringComparer.OrdinalIgnoreCase))
+            {
+                lowConfReasons.Add("soft_input_lock_fallback");
+            }
+            scanMeta = AppendScanMeta(scanMeta, "verifier_soft_input_lock");
+        }
+        else if (string.Equals(mode, "hard", StringComparison.OrdinalIgnoreCase))
+        {
+            scanMeta = AppendScanMeta(scanMeta, "verifier_hard_input_lock");
+        }
+
+        return scan with
+        {
+            Capabilities = capabilities,
+            LowConfReasons = lowConfReasons.Count > 0 ? lowConfReasons : null,
+            ScanMeta = scanMeta
+        };
+    }
+
+    private static string AppendScanMeta(string existing, string suffix)
+    {
+        if (string.IsNullOrWhiteSpace(existing))
+        {
+            return suffix;
+        }
+        if (existing.Contains(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return existing;
+        }
+        return $"{existing}+{suffix}";
     }
 
     private static string BuildCaptureFileName(int ordinal, RuntimeScreenCaptureStep step, int? pageIndex)

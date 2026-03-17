@@ -11,7 +11,8 @@ internal sealed record RuntimeScreenCaptureStep(
     int? PageIndex = null,
     int StepDelayMs = 120,
     int PostDelayMs = 350,
-    bool Capture = true
+    bool Capture = true,
+    bool ExpectFrameChange = true
 );
 
 internal static class RuntimeScreenCapturePlan
