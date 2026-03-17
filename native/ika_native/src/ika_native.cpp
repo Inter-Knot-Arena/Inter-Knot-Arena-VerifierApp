@@ -233,17 +233,22 @@ bool resolve_virtual_key(const std::string& token, WORD& key) {
 }
 
 bool send_key_press(WORD key) {
-    INPUT inputs[2]{};
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wVk = key;
-    inputs[0].ki.dwFlags = 0;
+    INPUT key_down{};
+    key_down.type = INPUT_KEYBOARD;
+    key_down.ki.wVk = key;
+    key_down.ki.dwFlags = 0;
 
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wVk = key;
-    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    if (SendInput(1U, &key_down, sizeof(INPUT)) != 1U) {
+        return false;
+    }
 
-    const UINT sent = SendInput(2U, inputs, sizeof(INPUT));
-    return sent == 2U;
+    std::this_thread::sleep_for(std::chrono::milliseconds(35));
+
+    INPUT key_up{};
+    key_up.type = INPUT_KEYBOARD;
+    key_up.ki.wVk = key;
+    key_up.ki.dwFlags = KEYEVENTF_KEYUP;
+    return SendInput(1U, &key_up, sizeof(INPUT)) == 1U;
 }
 
 bool parse_wait_command(const std::string& token, int& wait_ms) {
@@ -297,11 +302,21 @@ bool resolve_click_point(double x_value, double y_value, LONG& x, LONG& y) {
     auto rect_height = static_cast<LONG>(GetSystemMetrics(SM_CYSCREEN));
 
     const auto foreground_window = GetForegroundWindow();
-    if (foreground_window != nullptr && GetWindowRect(foreground_window, &rect) != FALSE) {
-        rect_left = rect.left;
-        rect_top = rect.top;
-        rect_width = std::max<LONG>(0, rect.right - rect.left);
-        rect_height = std::max<LONG>(0, rect.bottom - rect.top);
+    if (foreground_window != nullptr) {
+        RECT client_rect{};
+        POINT client_origin{};
+        if (GetClientRect(foreground_window, &client_rect) != FALSE &&
+            ClientToScreen(foreground_window, &client_origin) != FALSE) {
+            rect_left = client_origin.x;
+            rect_top = client_origin.y;
+            rect_width = std::max<LONG>(0, client_rect.right - client_rect.left);
+            rect_height = std::max<LONG>(0, client_rect.bottom - client_rect.top);
+        } else if (GetWindowRect(foreground_window, &rect) != FALSE) {
+            rect_left = rect.left;
+            rect_top = rect.top;
+            rect_width = std::max<LONG>(0, rect.right - rect.left);
+            rect_height = std::max<LONG>(0, rect.bottom - rect.top);
+        }
     }
 
     if (rect_width <= 0 || rect_height <= 0) {
@@ -355,45 +370,52 @@ bool send_left_click(LONG x, LONG y, int click_count) {
         return false;
     }
 
-    const auto virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    const auto virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    const auto virtual_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    const auto virtual_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-    if (virtual_width <= 1 || virtual_height <= 1) {
-        return false;
-    }
+    if (SetCursorPos(static_cast<int>(x), static_cast<int>(y)) == FALSE) {
+        const auto virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        const auto virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        const auto virtual_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        const auto virtual_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        if (virtual_width <= 1 || virtual_height <= 1) {
+            return false;
+        }
 
-    const auto normalized_x = static_cast<LONG>(
-        std::llround(((static_cast<double>(x - virtual_left) * 65535.0) / static_cast<double>(virtual_width - 1)))
-    );
-    const auto normalized_y = static_cast<LONG>(
-        std::llround(((static_cast<double>(y - virtual_top) * 65535.0) / static_cast<double>(virtual_height - 1)))
-    );
+        const auto normalized_x = static_cast<LONG>(
+            std::llround(((static_cast<double>(x - virtual_left) * 65535.0) / static_cast<double>(virtual_width - 1)))
+        );
+        const auto normalized_y = static_cast<LONG>(
+            std::llround(((static_cast<double>(y - virtual_top) * 65535.0) / static_cast<double>(virtual_height - 1)))
+        );
 
-    INPUT move_input{};
-    move_input.type = INPUT_MOUSE;
-    move_input.mi.dx = normalized_x;
-    move_input.mi.dy = normalized_y;
-    move_input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-    if (SendInput(1U, &move_input, sizeof(INPUT)) != 1U) {
-        return false;
+        INPUT move_input{};
+        move_input.type = INPUT_MOUSE;
+        move_input.mi.dx = normalized_x;
+        move_input.mi.dy = normalized_y;
+        move_input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+        if (SendInput(1U, &move_input, sizeof(INPUT)) != 1U) {
+            return false;
+        }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(40));
 
     for (int index = 0; index < click_count; ++index) {
-        INPUT inputs[2]{};
-        inputs[0].type = INPUT_MOUSE;
-        inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-        inputs[1].type = INPUT_MOUSE;
-        inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        INPUT mouse_down{};
+        mouse_down.type = INPUT_MOUSE;
+        mouse_down.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        if (SendInput(1U, &mouse_down, sizeof(INPUT)) != 1U) {
+            return false;
+        }
 
-        const auto sent = SendInput(2U, inputs, sizeof(INPUT));
-        if (sent != 2U) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(35));
+
+        INPUT mouse_up{};
+        mouse_up.type = INPUT_MOUSE;
+        mouse_up.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        if (SendInput(1U, &mouse_up, sizeof(INPUT)) != 1U) {
             return false;
         }
 
         if (index + 1 < click_count) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(60));
+            std::this_thread::sleep_for(std::chrono::milliseconds(85));
         }
     }
 
