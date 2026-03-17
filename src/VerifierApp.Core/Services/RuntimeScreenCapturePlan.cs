@@ -157,7 +157,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 1,
             ScreenAlias: "agent_1_detail",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -167,7 +166,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ESC,DOWN",
             AgentSlotIndex: 1,
             ScreenAlias: "move_to_agent_2",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 260,
             Capture: false
@@ -177,7 +175,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 2,
             ScreenAlias: "agent_2_detail",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -187,7 +184,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ESC,DOWN",
             AgentSlotIndex: 2,
             ScreenAlias: "move_to_agent_3",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 260,
             Capture: false
@@ -197,7 +193,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 3,
             ScreenAlias: "agent_3_detail",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -207,7 +202,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ESC",
             AgentSlotIndex: 3,
             ScreenAlias: "exit_agent_3_detail",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 200,
             Capture: false
@@ -221,7 +215,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 1,
             ScreenAlias: "agent_1_detail",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -231,7 +224,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "RIGHT,RIGHT",
             AgentSlotIndex: 1,
             ScreenAlias: "agent_1_equipment",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -241,7 +233,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 1,
             ScreenAlias: "agent_1_amplifier",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -251,7 +242,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ESC,LEFT,LEFT,ESC,DOWN",
             AgentSlotIndex: 1,
             ScreenAlias: "move_to_agent_2",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 260,
             Capture: false
@@ -261,7 +251,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 2,
             ScreenAlias: "agent_2_detail",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -271,7 +260,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "RIGHT,RIGHT",
             AgentSlotIndex: 2,
             ScreenAlias: "agent_2_equipment",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -281,7 +269,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 2,
             ScreenAlias: "agent_2_amplifier",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -291,7 +278,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ESC,LEFT,LEFT,ESC,DOWN",
             AgentSlotIndex: 2,
             ScreenAlias: "move_to_agent_3",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 260,
             Capture: false
@@ -301,7 +287,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 3,
             ScreenAlias: "agent_3_detail",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -311,7 +296,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "RIGHT,RIGHT",
             AgentSlotIndex: 3,
             ScreenAlias: "agent_3_equipment",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -321,7 +305,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 3,
             ScreenAlias: "agent_3_amplifier",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -331,7 +314,6 @@ internal static class RuntimeScreenCapturePlan
             Script: "ESC,LEFT,LEFT,ESC",
             AgentSlotIndex: 3,
             ScreenAlias: "exit_agent_3_amplifier",
-            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 220,
             Capture: false
