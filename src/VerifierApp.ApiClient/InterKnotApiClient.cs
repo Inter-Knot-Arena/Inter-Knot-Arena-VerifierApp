@@ -129,53 +129,180 @@ public sealed class InterKnotApiClient : IVerifierApiClient, IDisposable
                 confidenceByField = result.ConfidenceByField ?? new Dictionary<string, double>(),
                 fieldSources = result.FieldSources ?? new Dictionary<string, string>(),
                 capabilities = result.Capabilities ?? new Dictionary<string, bool>(),
-                agents = result.Agents.Select(agent => new
-                {
-                    agentId = agent.AgentId,
-                    level = agent.Level,
-                    levelCap = agent.LevelCap,
-                    mindscape = agent.Mindscape,
-                    mindscapeCap = agent.MindscapeCap,
-                    stats = agent.Stats ?? new Dictionary<string, double>(),
-                    weapon = agent.Weapon is null
-                        ? null
-                        : new
-                        {
-                            weaponId = agent.Weapon.WeaponId,
-                            displayName = agent.Weapon.DisplayName,
-                            level = agent.Weapon.Level,
-                            levelCap = agent.Weapon.LevelCap,
-                            baseStatKey = agent.Weapon.BaseStatKey,
-                            baseStatValue = agent.Weapon.BaseStatValue,
-                            advancedStatKey = agent.Weapon.AdvancedStatKey,
-                            advancedStatValue = agent.Weapon.AdvancedStatValue
-                        },
-                    weaponPresent = agent.WeaponPresent,
-                    discSlotOccupancy = agent.DiscSlotOccupancy ?? new Dictionary<string, bool>(),
-                    discs = (agent.Discs ?? Array.Empty<DiscScanResult>()).Select(disc => new
-                    {
-                        slot = disc.Slot,
-                        setId = disc.SetId,
-                        displayName = disc.DisplayName,
-                        level = disc.Level,
-                        levelCap = disc.LevelCap,
-                        mainStatKey = disc.MainStatKey,
-                        mainStatValue = disc.MainStatValue,
-                        substats = (disc.Substats ?? Array.Empty<DiscSubstatScanResult>()).Select(substat => new
-                        {
-                            key = substat.Key,
-                            value = substat.Value
-                        }).ToList()
-                    }).ToList(),
-                    confidenceByField = agent.ConfidenceByField ?? new Dictionary<string, double>(),
-                    fieldSources = agent.FieldSources ?? new Dictionary<string, string>()
-                }).ToList()
+                agents = result.Agents.Select(BuildAgentPayload).ToList()
             },
             headers: null,
             includeBearer: true,
             ct
         );
         return new RosterImportResult(response.Status, response.Summary?.Message ?? "OK");
+    }
+
+    private static Dictionary<string, object?> BuildAgentPayload(AgentScanResult agent)
+    {
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["agentId"] = agent.AgentId
+        };
+
+        if (agent.Level is not null)
+        {
+            payload["level"] = agent.Level;
+        }
+        if (agent.LevelCap is not null)
+        {
+            payload["levelCap"] = agent.LevelCap;
+        }
+        if (agent.Mindscape is not null)
+        {
+            payload["mindscape"] = agent.Mindscape;
+        }
+        if (agent.MindscapeCap is not null)
+        {
+            payload["mindscapeCap"] = agent.MindscapeCap;
+        }
+        if (agent.Stats is { Count: > 0 })
+        {
+            payload["stats"] = agent.Stats;
+        }
+
+        var weaponPayload = BuildWeaponPayload(agent.Weapon);
+        if (weaponPayload is not null)
+        {
+            payload["weapon"] = weaponPayload;
+        }
+        if (agent.WeaponPresent is not null)
+        {
+            payload["weaponPresent"] = agent.WeaponPresent;
+        }
+        if (agent.DiscSlotOccupancy is { Count: > 0 })
+        {
+            payload["discSlotOccupancy"] = agent.DiscSlotOccupancy;
+        }
+
+        var discsPayload = BuildDiscsPayload(agent.Discs);
+        if (discsPayload.Count > 0)
+        {
+            payload["discs"] = discsPayload;
+        }
+        if (agent.ConfidenceByField is { Count: > 0 })
+        {
+            payload["confidenceByField"] = agent.ConfidenceByField;
+        }
+        if (agent.FieldSources is { Count: > 0 })
+        {
+            payload["fieldSources"] = agent.FieldSources;
+        }
+
+        return payload;
+    }
+
+    private static Dictionary<string, object?>? BuildWeaponPayload(WeaponScanResult? weapon)
+    {
+        if (weapon is null)
+        {
+            return null;
+        }
+
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(weapon.WeaponId))
+        {
+            payload["weaponId"] = weapon.WeaponId;
+        }
+        if (!string.IsNullOrWhiteSpace(weapon.DisplayName))
+        {
+            payload["displayName"] = weapon.DisplayName;
+        }
+        if (weapon.Level is not null)
+        {
+            payload["level"] = weapon.Level;
+        }
+        if (weapon.LevelCap is not null)
+        {
+            payload["levelCap"] = weapon.LevelCap;
+        }
+        if (!string.IsNullOrWhiteSpace(weapon.BaseStatKey))
+        {
+            payload["baseStatKey"] = weapon.BaseStatKey;
+        }
+        if (weapon.BaseStatValue is not null)
+        {
+            payload["baseStatValue"] = weapon.BaseStatValue;
+        }
+        if (!string.IsNullOrWhiteSpace(weapon.AdvancedStatKey))
+        {
+            payload["advancedStatKey"] = weapon.AdvancedStatKey;
+        }
+        if (weapon.AdvancedStatValue is not null)
+        {
+            payload["advancedStatValue"] = weapon.AdvancedStatValue;
+        }
+
+        return payload.Count > 0 ? payload : null;
+    }
+
+    private static List<Dictionary<string, object?>> BuildDiscsPayload(IReadOnlyList<DiscScanResult>? discs)
+    {
+        var payload = new List<Dictionary<string, object?>>();
+        foreach (var disc in discs ?? Array.Empty<DiscScanResult>())
+        {
+            var discPayload = new Dictionary<string, object?>(StringComparer.Ordinal);
+            if (disc.Slot is not null)
+            {
+                discPayload["slot"] = disc.Slot;
+            }
+            if (!string.IsNullOrWhiteSpace(disc.SetId))
+            {
+                discPayload["setId"] = disc.SetId;
+            }
+            if (!string.IsNullOrWhiteSpace(disc.DisplayName))
+            {
+                discPayload["displayName"] = disc.DisplayName;
+            }
+            if (disc.Level is not null)
+            {
+                discPayload["level"] = disc.Level;
+            }
+            if (disc.LevelCap is not null)
+            {
+                discPayload["levelCap"] = disc.LevelCap;
+            }
+            if (!string.IsNullOrWhiteSpace(disc.MainStatKey))
+            {
+                discPayload["mainStatKey"] = disc.MainStatKey;
+            }
+            if (disc.MainStatValue is not null)
+            {
+                discPayload["mainStatValue"] = disc.MainStatValue;
+            }
+
+            var substatsPayload = new List<Dictionary<string, object?>>();
+            foreach (var substat in disc.Substats ?? Array.Empty<DiscSubstatScanResult>())
+            {
+                var substatPayload = new Dictionary<string, object?>(StringComparer.Ordinal);
+                if (!string.IsNullOrWhiteSpace(substat.Key))
+                {
+                    substatPayload["key"] = substat.Key;
+                }
+                if (substat.Value is not null)
+                {
+                    substatPayload["value"] = substat.Value;
+                }
+                if (substatPayload.Count > 0)
+                {
+                    substatsPayload.Add(substatPayload);
+                }
+            }
+            if (substatsPayload.Count > 0)
+            {
+                discPayload["substats"] = substatsPayload;
+            }
+            if (discPayload.Count > 0)
+            {
+                payload.Add(discPayload);
+            }
+        }
+        return payload;
     }
 
     public async Task<MatchVerifierSession> CreateMatchSessionAsync(string matchId, CancellationToken ct)
