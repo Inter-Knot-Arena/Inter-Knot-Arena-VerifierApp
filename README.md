@@ -4,7 +4,7 @@ Desktop verifier for Inter-Knot Arena with:
 
 - OAuth loopback login.
 - In-app sign-in via email/password or Google (browser).
-- Visible-roster OCR import (`POST /verifier/roster/import`); full-account sync is currently blocked.
+- OCR roster import (`POST /verifier/roster/import`) with visible-slice mode and guarded multi-page full sync.
 - Match precheck/in-run evidence submission.
 - Hybrid stack: WPF + Python worker + C++ native module.
 - Bundled OCR/CV runtime packages with SHA256 integrity checks.
@@ -34,10 +34,11 @@ Desktop verifier for Inter-Knot Arena with:
 10. Before OCR scan, native scan script is executed (`ESC,TAB,TAB,ENTER` by default) under active input lock.
 11. Worker/CV capture path uses DXGI (`dxcam`) first for fullscreen compatibility, with safe fallback.
 
-## Current OCR limitation
+## Current OCR capability
 
-- The bundled OCR worker currently reads UID plus the roster slice visible on screen.
-- Full account overwrite remains disabled until the worker can navigate and capture every roster page reliably.
+- The bundled OCR worker reads UID plus the visible roster slice and can ingest richer follow-up captures (`agent_detail`, `amplifier_detail`, `disk_detail`) when supplied.
+- The desktop app includes a guarded multi-page full-sync path. It only performs destructive overwrite when terminal-slice coverage is confirmed via `capabilities.fullRosterCoverage=true`.
+- Built-in follow-up capture currently focuses on `agent_detail` screens for the visible slots; equipment fields are preserved from previous imports unless richer captures are available.
 
 ## Build prerequisites
 
@@ -95,8 +96,12 @@ Env vars required:
 - `IKA_SCAN_SCRIPT_STEP_DELAY_MS` - delay between key presses for `IKA_SCAN_SCRIPT` (default `120`).
 - `IKA_CAPTURE_OUTPUT_IDX` - monitor index for fullscreen DXGI capture (`0` by default).
 - `IKA_DEFAULT_OCR_CAPTURE_PLAN` - built-in OCR capture preset. Default is `VISIBLE_SLICE_AGENT_DETAIL_V1`; set to `OFF` to disable built-in follow-up captures.
-- `IKA_EXTRA_SCREEN_CAPTURE_PLAN_JSON` - optional JSON array of visible-slice follow-up captures executed under active input lock.
+- `IKA_EXTRA_SCREEN_CAPTURE_PLAN_JSON` - optional JSON array of follow-up captures executed under active input lock.
 - `IKA_EXTRA_SCREEN_CAPTURE_PLAN_PATH` - optional path to the same JSON capture plan; used when the inline env var is empty.
+- `IKA_FULL_SYNC_MAX_PAGES` - maximum roster pages to walk during multi-page full sync (default `64`).
+- `IKA_FULL_SYNC_MAX_STALLED_PAGES` - stop after this many pages add no new agents (default `3`).
+- `IKA_FULL_SYNC_PAGE_ADVANCE_SCRIPT` - key script used to advance to the next roster page during full sync (default `DOWN`).
+- `IKA_FULL_SYNC_PAGE_NORMALIZE_SCRIPT` - optional key script used before each page capture to stabilize the cursor (default `UP,UP`).
 
 When no explicit `IKA_EXTRA_SCREEN_CAPTURE_PLAN_*` override is provided, the desktop app now uses the built-in `VISIBLE_SLICE_AGENT_DETAIL_V1` plan. It opens the three visible roster slots one by one, captures their `agent_detail` screens, and returns to the roster slice before the worker call.
 

@@ -312,8 +312,8 @@ public sealed class ScanOrchestrator
             DataVersion: string.IsNullOrWhiteSpace(dataVersion) ? "unknown" : dataVersion,
             ConfidenceByField: topConfidence,
             ScanMeta: string.IsNullOrWhiteSpace(scanMeta)
-                ? "verifier_visible_slice_full_sync"
-                : $"{scanMeta}+verifier_visible_slice_full_sync",
+                ? "verifier_multipage_full_sync"
+                : $"{scanMeta}+verifier_multipage_full_sync",
             FieldSources: topFieldSources,
             Capabilities: capabilities,
             LowConfReasons: lowConfReasons.Count > 0

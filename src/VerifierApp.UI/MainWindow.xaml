@@ -338,7 +338,7 @@
                             <Border Grid.Column="0" Margin="0,0,8,0" Style="{StaticResource PanelCardStyle}">
                                 <StackPanel>
                                     <TextBlock Text="Roster Sync" Foreground="#F7FBFF" FontSize="20" FontWeight="SemiBold"/>
-                                    <TextBlock Margin="0,2,0,12" Foreground="#A7B9D7" Text="Run safe OCR import for the visible roster slice with built-in detail capture."/>
+                                    <TextBlock Margin="0,2,0,12" Foreground="#A7B9D7" Text="Run OCR import for the visible roster slice or multi-page full sync with built-in detail capture."/>
 
                                     <Grid>
                                         <Grid.ColumnDefinitions>
@@ -358,9 +358,8 @@
                                                   Grid.Column="2"
                                                   Margin="14,0,0,0"
                                                   VerticalAlignment="Center"
-                                                  Content="Full Sync (blocked)"
+                                                  Content="Full Sync (multi-page beta)"
                                                   IsChecked="False"
-                                                  IsEnabled="False"
                                                   Foreground="#D1DDF2"
                                                   FontWeight="SemiBold"/>
                                     </Grid>
@@ -368,7 +367,7 @@
                                     <TextBlock Margin="0,10,0,0"
                                                TextWrapping="Wrap"
                                                Foreground="#F0C88A"
-                                               Text="Full account overwrite is blocked until the worker can scan every roster page instead of only the currently visible screen. The default flow now captures detail screens for the 3 visible slots."/>
+                                               Text="Full Sync now walks roster pages under active input lock and only applies overwrite when terminal-slice coverage is confirmed. Built-in follow-up capture still focuses on agent detail screens, so missing equipment fields are preserved unless richer captures are available."/>
 
                                     <Grid Margin="0,10,0,0">
                                         <Grid.ColumnDefinitions>
@@ -393,7 +392,7 @@
                                     <Button x:Name="RosterScanButton"
                                             Margin="0,14,0,0"
                                             Style="{StaticResource PrimaryActionButtonStyle}"
-                                            Content="Run Visible Roster Scan + Import"
+                                            Content="Run OCR Scan + Import"
                                             Click="RosterScanButton_OnClick"/>
                                 </StackPanel>
                             </Border>
