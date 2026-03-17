@@ -1,12 +1,50 @@
 using System.Runtime.InteropServices;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Diagnostics;
 using VerifierApp.Core.Services;
 
 namespace VerifierApp.WorkerHost;
 
 public sealed class NativeBridge : INativeBridge
 {
+    public bool TryFocusGameWindow()
+    {
+        var processName = Environment.GetEnvironmentVariable("IKA_GAME_PROCESS_NAME");
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            processName = "ZenlessZoneZero";
+        }
+
+        var titleHint = Environment.GetEnvironmentVariable("IKA_GAME_WINDOW_TITLE");
+        var normalizedProcessName = Path.GetFileNameWithoutExtension(processName.Trim());
+        if (string.IsNullOrWhiteSpace(normalizedProcessName))
+        {
+            return false;
+        }
+
+        try
+        {
+            var target = Process
+                .GetProcessesByName(normalizedProcessName)
+                .Where(process => process.MainWindowHandle != IntPtr.Zero)
+                .OrderByDescending(process => MatchesWindowTitle(process, titleHint))
+                .ThenByDescending(process => process.StartTime)
+                .FirstOrDefault();
+
+            if (target is null || target.MainWindowHandle == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return FocusWindow(target.MainWindowHandle);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public bool TryLockInput() => IkaNativeLockInput() == 1;
 
     public void UnlockInput()
@@ -74,6 +112,80 @@ public sealed class NativeBridge : INativeBridge
 
     private const int SystemMetricCxScreen = 0;
     private const int SystemMetricCyScreen = 1;
+    private const int ShowWindowRestore = 9;
+
+    private static bool MatchesWindowTitle(Process process, string? titleHint)
+    {
+        if (string.IsNullOrWhiteSpace(titleHint))
+        {
+            return true;
+        }
+
+        try
+        {
+            return process.MainWindowTitle.Contains(titleHint.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool FocusWindow(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (IsIconic(windowHandle))
+            {
+                _ = ShowWindowAsync(windowHandle, ShowWindowRestore);
+            }
+
+            var foregroundWindow = GetForegroundWindow();
+            var targetThreadId = GetWindowThreadProcessId(windowHandle, out _);
+            var foregroundThreadId = foregroundWindow != IntPtr.Zero
+                ? GetWindowThreadProcessId(foregroundWindow, out _)
+                : 0;
+            var currentThreadId = GetCurrentThreadId();
+
+            if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId)
+            {
+                _ = AttachThreadInput(foregroundThreadId, currentThreadId, true);
+            }
+            if (targetThreadId != 0 && targetThreadId != currentThreadId)
+            {
+                _ = AttachThreadInput(targetThreadId, currentThreadId, true);
+            }
+
+            try
+            {
+                _ = BringWindowToTop(windowHandle);
+                _ = SetForegroundWindow(windowHandle);
+                _ = SetFocus(windowHandle);
+            }
+            finally
+            {
+                if (targetThreadId != 0 && targetThreadId != currentThreadId)
+                {
+                    _ = AttachThreadInput(targetThreadId, currentThreadId, false);
+                }
+                if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId)
+                {
+                    _ = AttachThreadInput(foregroundThreadId, currentThreadId, false);
+                }
+            }
+
+            return GetForegroundWindow() == windowHandle;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     [DllImport("ika_native.dll", EntryPoint = "ika_native_lock_input", CallingConvention = CallingConvention.Cdecl)]
     private static extern int IkaNativeLockInput();
@@ -89,4 +201,31 @@ public sealed class NativeBridge : INativeBridge
 
     [DllImport("user32.dll", ExactSpelling = true)]
     private static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern IntPtr SetFocus(IntPtr hWnd);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    private static extern uint GetCurrentThreadId();
 }

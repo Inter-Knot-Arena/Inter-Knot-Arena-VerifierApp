@@ -42,6 +42,7 @@ public interface IWorkerClient
 
 public interface INativeBridge
 {
+    bool TryFocusGameWindow();
     bool TryLockInput();
     void UnlockInput();
     bool ExecuteScanScript(string script, int stepDelayMs);

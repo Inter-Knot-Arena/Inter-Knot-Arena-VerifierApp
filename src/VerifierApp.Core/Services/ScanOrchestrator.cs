@@ -27,6 +27,17 @@ public sealed class ScanOrchestrator
         CancellationToken ct
     )
     {
+        if (!_nativeBridge.TryFocusGameWindow())
+        {
+            throw new InvalidOperationException("Scan aborted: game window could not be focused.");
+        }
+
+        var focusDelayMs = ReadNonNegativeIntFromEnvironment("IKA_GAME_FOCUS_DELAY_MS", 250);
+        if (focusDelayMs > 0)
+        {
+            await Task.Delay(focusDelayMs, ct);
+        }
+
         var locked = _nativeBridge.TryLockInput();
         if (!locked)
         {
@@ -57,11 +68,6 @@ public sealed class ScanOrchestrator
                 throw new InvalidOperationException(
                     $"Scan aborted [{scan.ErrorCode}]: {scan.ErrorMessage ?? "worker scan failure"}."
                 );
-            }
-
-            if (string.IsNullOrWhiteSpace(scan.Uid))
-            {
-                throw new InvalidOperationException("Scan aborted: UID was not extracted.");
             }
 
             var importResult = await _apiClient.ImportRosterAsync(scan, ct);
@@ -370,6 +376,7 @@ public sealed class ScanOrchestrator
                 Locale: locale,
                 Resolution: resolution,
                 InputLockActive: true,
+                CaptureScreen: runtimeCaptures.Count == 0,
                 ScreenCaptures: runtimeCaptures.Count > 0 ? runtimeCaptures : null
             ),
             ct

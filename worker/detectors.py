@@ -82,18 +82,11 @@ _ROSTER_UID_REGION: dict[str, tuple[int, int, int, int]] = {
     "1440p": (1540, 1220, 860, 180),
 }
 
-_ROSTER_AGENT_REGIONS: dict[str, list[tuple[int, int, int, int]]] = {
-    "1080p": [
-        (1180, 150, 520, 220),
-        (1180, 390, 520, 220),
-        (1180, 630, 520, 220),
-    ],
-    "1440p": [
-        (1560, 200, 700, 300),
-        (1560, 530, 700, 300),
-        (1560, 860, 700, 300),
-    ],
-}
+_ROSTER_AGENT_REGIONS = (
+    (0.527, 0.014, 0.160, 0.194),
+    (0.566, 0.222, 0.133, 0.208),
+    (0.605, 0.479, 0.141, 0.278),
+)
 
 
 def _load_ocr_runtime():
@@ -212,13 +205,23 @@ def _crop_with_box(frame: np.ndarray, box: tuple[int, int, int, int]) -> np.ndar
     return crop
 
 
+def _crop_with_fractional_box(frame: np.ndarray, box: tuple[float, float, float, float]) -> np.ndarray | None:
+    if frame.size == 0:
+        return None
+    height, width = frame.shape[:2]
+    x = int(round(float(box[0]) * width))
+    y = int(round(float(box[1]) * height))
+    w = int(round(float(box[2]) * width))
+    h = int(round(float(box[3]) * height))
+    return _crop_with_box(frame, (x, y, w, h))
+
+
 def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str, Any]:
     frame = _capture_screen_bgr()
     if frame is None:
         return {}
 
     uid_box = _ROSTER_UID_REGION.get(resolution, _ROSTER_UID_REGION["1080p"])
-    icon_boxes = _ROSTER_AGENT_REGIONS.get(resolution, _ROSTER_AGENT_REGIONS["1080p"])
     temp_root = Path(tempfile.gettempdir()) / "ika_verifier" / "roster" / session_id
     temp_root.mkdir(parents=True, exist_ok=True)
 
@@ -244,8 +247,8 @@ def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str
             anchors["profile"] = True
 
     icon_paths: list[dict[str, str]] = []
-    for index, box in enumerate(icon_boxes):
-        crop = _crop_with_box(frame, box)
+    for index, box in enumerate(_ROSTER_AGENT_REGIONS):
+        crop = _crop_with_fractional_box(frame, box)
         if crop is None:
             continue
         icon_path = temp_root / f"agent_icon_{index + 1}.png"
@@ -256,6 +259,9 @@ def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str
         payload["agentIconPaths"] = icon_paths
         anchors["agents"] = len(icon_paths) >= 2
         anchors["equipment"] = len(icon_paths) >= 2
+    elif screen_captures:
+        anchors["agents"] = True
+        anchors["equipment"] = True
 
     if screen_captures:
         payload["screenCaptures"] = screen_captures
