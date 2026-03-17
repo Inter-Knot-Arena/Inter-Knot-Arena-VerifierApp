@@ -106,6 +106,21 @@ public sealed class ScanOrchestrator
         CancellationToken ct
     )
     {
+        var normalizeScript = ReadScriptFromEnvironment("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_SCRIPT", "UP,UP,UP");
+        var normalizeStepDelayMs = ReadPositiveIntFromEnvironment("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_STEP_DELAY_MS", 120);
+        var normalizePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_POST_DELAY_MS", 260);
+        if (!string.IsNullOrWhiteSpace(normalizeScript))
+        {
+            if (!_nativeBridge.ExecuteScanScript(normalizeScript, normalizeStepDelayMs))
+            {
+                throw new InvalidOperationException("Scan aborted: visible slice could not normalize roster cursor.");
+            }
+            if (normalizePostDelayMs > 0)
+            {
+                await Task.Delay(normalizePostDelayMs, ct);
+            }
+        }
+
         var runtimeCaptures = await CaptureExtraScreensAsync(sessionId, ct, pageIndex: 1);
         return await RunWorkerScanAsync(
             sessionId,
@@ -401,6 +416,7 @@ public sealed class ScanOrchestrator
         for (var index = 0; index < plan.Count; index++)
         {
             ct.ThrowIfCancellationRequested();
+            await RefocusGameWindowAsync(ct, $"Scan aborted: game window could not be focused for extra capture step {index + 1}.");
             var step = plan[index];
             if (!_nativeBridge.ExecuteScanScript(step.Script ?? string.Empty, step.StepDelayMs))
             {
@@ -422,6 +438,7 @@ public sealed class ScanOrchestrator
             var capturePageIndex = step.PageIndex ?? pageIndex;
             var fileName = BuildCaptureFileName(index + 1, step, capturePageIndex);
             var outputPath = Path.Combine(tempRoot, fileName);
+            await RefocusGameWindowAsync(ct, $"Scan aborted: game window focus was lost before capturing step {index + 1}.");
             if (!_nativeBridge.CaptureGameWindowPng(outputPath))
             {
                 throw new InvalidOperationException(
@@ -442,6 +459,20 @@ public sealed class ScanOrchestrator
         }
 
         return captures;
+    }
+
+    private async Task RefocusGameWindowAsync(CancellationToken ct, string failureMessage)
+    {
+        if (!_nativeBridge.TryFocusGameWindow())
+        {
+            throw new InvalidOperationException(failureMessage);
+        }
+
+        var refocusDelayMs = ReadNonNegativeIntFromEnvironment("IKA_GAME_CAPTURE_REFOCUS_DELAY_MS", 90);
+        if (refocusDelayMs > 0)
+        {
+            await Task.Delay(refocusDelayMs, ct);
+        }
     }
 
     private static string BuildCaptureFileName(int ordinal, RuntimeScreenCaptureStep step, int? pageIndex)
