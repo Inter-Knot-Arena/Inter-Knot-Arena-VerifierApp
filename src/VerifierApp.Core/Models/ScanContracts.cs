@@ -6,7 +6,8 @@ public sealed record ScreenCaptureInput(
     string? AgentId = null,
     int? SlotIndex = null,
     int? AgentSlotIndex = null,
-    string? ScreenAlias = null
+    string? ScreenAlias = null,
+    int? PageIndex = null
 );
 
 public sealed record RosterScanCommand(

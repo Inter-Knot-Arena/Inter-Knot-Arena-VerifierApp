@@ -8,6 +8,7 @@ internal sealed record RuntimeScreenCaptureStep(
     int? AgentSlotIndex = null,
     int? SlotIndex = null,
     string? ScreenAlias = null,
+    int? PageIndex = null,
     int StepDelayMs = 120,
     int PostDelayMs = 350,
     bool Capture = true
@@ -133,10 +134,12 @@ internal static class RuntimeScreenCapturePlan
             : step.ScreenAlias.Trim();
         var stepDelayMs = step.StepDelayMs > 0 ? step.StepDelayMs : 120;
         var postDelayMs = step.PostDelayMs >= 0 ? step.PostDelayMs : 350;
+        var pageIndex = step.PageIndex is > 0 ? step.PageIndex : null;
         return step with
         {
             Role = role,
             ScreenAlias = alias,
+            PageIndex = pageIndex,
             StepDelayMs = stepDelayMs,
             PostDelayMs = postDelayMs
         };
@@ -149,6 +152,7 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 1,
             ScreenAlias: "agent_1_detail",
+            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -158,6 +162,7 @@ internal static class RuntimeScreenCapturePlan
             Script: "ESC,DOWN",
             AgentSlotIndex: 1,
             ScreenAlias: "move_to_agent_2",
+            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 260,
             Capture: false
@@ -167,6 +172,7 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 2,
             ScreenAlias: "agent_2_detail",
+            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -176,6 +182,7 @@ internal static class RuntimeScreenCapturePlan
             Script: "ESC,DOWN",
             AgentSlotIndex: 2,
             ScreenAlias: "move_to_agent_3",
+            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 260,
             Capture: false
@@ -185,6 +192,7 @@ internal static class RuntimeScreenCapturePlan
             Script: "ENTER",
             AgentSlotIndex: 3,
             ScreenAlias: "agent_3_detail",
+            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 450,
             Capture: true
@@ -194,6 +202,7 @@ internal static class RuntimeScreenCapturePlan
             Script: "ESC",
             AgentSlotIndex: 3,
             ScreenAlias: "exit_agent_3_detail",
+            PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 200,
             Capture: false
