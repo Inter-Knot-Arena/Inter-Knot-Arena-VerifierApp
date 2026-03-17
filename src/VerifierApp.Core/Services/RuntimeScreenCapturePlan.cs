@@ -18,6 +18,7 @@ internal static class RuntimeScreenCapturePlan
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string DefaultPreset = "VISIBLE_SLICE_AGENT_DETAIL_V1";
+    private const string RichEquipmentPreset = "VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA";
 
     public static IReadOnlyList<RuntimeScreenCaptureStep> LoadActivePlan()
     {
@@ -76,12 +77,16 @@ internal static class RuntimeScreenCapturePlan
             return [];
         }
 
-        if (!preset.Equals(DefaultPreset, StringComparison.OrdinalIgnoreCase))
+        if (preset.Equals(DefaultPreset, StringComparison.OrdinalIgnoreCase))
         {
-            return [];
+            return CreateVisibleSliceAgentDetailPlan();
+        }
+        if (preset.Equals(RichEquipmentPreset, StringComparison.OrdinalIgnoreCase))
+        {
+            return CreateVisibleSliceRichEquipmentPlan();
         }
 
-        return CreateVisibleSliceAgentDetailPlan();
+        return [];
     }
 
     private static string ReadFromFile(string? path)
@@ -205,6 +210,130 @@ internal static class RuntimeScreenCapturePlan
             PageIndex: 1,
             StepDelayMs: 120,
             PostDelayMs: 200,
+            Capture: false
+        ),
+    ];
+
+    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceRichEquipmentPlan() =>
+    [
+        new RuntimeScreenCaptureStep(
+            Role: "agent_detail",
+            Script: "ENTER",
+            AgentSlotIndex: 1,
+            ScreenAlias: "agent_1_detail",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 450,
+            Capture: true
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: "equipment",
+            Script: "RIGHT,RIGHT",
+            AgentSlotIndex: 1,
+            ScreenAlias: "agent_1_equipment",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 450,
+            Capture: true
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: "amplifier_detail",
+            Script: "ENTER",
+            AgentSlotIndex: 1,
+            ScreenAlias: "agent_1_amplifier",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 450,
+            Capture: true
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: string.Empty,
+            Script: "ESC,LEFT,LEFT,ESC,DOWN",
+            AgentSlotIndex: 1,
+            ScreenAlias: "move_to_agent_2",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 260,
+            Capture: false
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: "agent_detail",
+            Script: "ENTER",
+            AgentSlotIndex: 2,
+            ScreenAlias: "agent_2_detail",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 450,
+            Capture: true
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: "equipment",
+            Script: "RIGHT,RIGHT",
+            AgentSlotIndex: 2,
+            ScreenAlias: "agent_2_equipment",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 450,
+            Capture: true
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: "amplifier_detail",
+            Script: "ENTER",
+            AgentSlotIndex: 2,
+            ScreenAlias: "agent_2_amplifier",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 450,
+            Capture: true
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: string.Empty,
+            Script: "ESC,LEFT,LEFT,ESC,DOWN",
+            AgentSlotIndex: 2,
+            ScreenAlias: "move_to_agent_3",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 260,
+            Capture: false
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: "agent_detail",
+            Script: "ENTER",
+            AgentSlotIndex: 3,
+            ScreenAlias: "agent_3_detail",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 450,
+            Capture: true
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: "equipment",
+            Script: "RIGHT,RIGHT",
+            AgentSlotIndex: 3,
+            ScreenAlias: "agent_3_equipment",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 450,
+            Capture: true
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: "amplifier_detail",
+            Script: "ENTER",
+            AgentSlotIndex: 3,
+            ScreenAlias: "agent_3_amplifier",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 450,
+            Capture: true
+        ),
+        new RuntimeScreenCaptureStep(
+            Role: string.Empty,
+            Script: "ESC,LEFT,LEFT,ESC",
+            AgentSlotIndex: 3,
+            ScreenAlias: "exit_agent_3_amplifier",
+            PageIndex: 1,
+            StepDelayMs: 120,
+            PostDelayMs: 220,
             Capture: false
         ),
     ];
