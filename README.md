@@ -74,6 +74,12 @@ Optional snapshot-based smoke:
 .\scripts\smoke_worker.ps1 -Locale RU -Resolution 1440p -CvPrecheckFrame "D:\shots\precheck.png" -CvInrunFrame "D:\shots\inrun.png" -UidImage "D:\shots\uid.png" -AgentIcons @("D:\shots\agent1.png","D:\shots\agent2.png","D:\shots\agent3.png")
 ```
 
+Headless live OCR smoke against a running game window:
+
+```powershell
+.\scripts\smoke_live_ocr.ps1 -Locale RU -Resolution 1440p -CapturePlanPreset VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA -OutputPath "D:\tmp\live_scan.json"
+```
+
 ## Code signing
 
 ```powershell
@@ -92,15 +98,23 @@ Env vars required:
 
 ## Optional runtime env vars
 
-- `IKA_SCAN_SCRIPT` - comma-separated key sequence for pre-scan navigation (`ESC,TAB,TAB,ENTER` by default).
+ - `IKA_SCAN_SCRIPT` - comma-separated pre-scan navigation script (`ESC,TAB,TAB,ENTER` by default). Supports key tokens plus `WAIT:ms`, `CLICK:x:y`, and `DBLCLICK:x:y`. If both coordinates are in `0..1`, they are treated as normalized coordinates inside the focused game window.
 - `IKA_SCAN_SCRIPT_STEP_DELAY_MS` - delay between key presses for `IKA_SCAN_SCRIPT` (default `120`).
+ - `IKA_SCAN_SCRIPT_POST_DELAY_MS` - extra wait after the pre-scan script completes (default `250`).
 - `IKA_GAME_PROCESS_NAME` - process name used when auto-focusing the game before scan (`ZenlessZoneZero` by default).
 - `IKA_GAME_WINDOW_TITLE` - optional window-title hint used to prefer the correct game window.
 - `IKA_GAME_FOCUS_DELAY_MS` - extra wait after the game window is focused (default `250`).
+- `IKA_GAME_CAPTURE_REFOCUS_DELAY_MS` - small extra wait after each per-step re-focus during live OCR automation (default `90`).
+- `IKA_ALLOW_SOFT_INPUT_LOCK` - optional fallback for unattended dev/live runs when Win32 `BlockInput()` is unavailable. The scan is marked degraded with `soft_input_lock_fallback`.
 - `IKA_CAPTURE_OUTPUT_IDX` - monitor index for fullscreen DXGI capture (`0` by default).
+- `IKA_CAPTURE_STEP_MAX_ATTEMPTS` - maximum attempts for each live OCR automation step before aborting (`2` by default).
+- `IKA_CAPTURE_STEP_RETRY_DELAY_MS` - delay between failed live OCR automation attempts (`180` by default).
 - `IKA_DEFAULT_OCR_CAPTURE_PLAN` - built-in OCR capture preset. Default is `VISIBLE_SLICE_AGENT_DETAIL_V1`; set to `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA` to try richer `equipment/amplifier_detail` follow-up captures, or `OFF` to disable built-in follow-up captures.
 - `IKA_EXTRA_SCREEN_CAPTURE_PLAN_JSON` - optional JSON array of follow-up captures executed under active input lock.
 - `IKA_EXTRA_SCREEN_CAPTURE_PLAN_PATH` - optional path to the same JSON capture plan; used when the inline env var is empty.
+ - `IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_SCRIPT` - optional script used before built-in visible-slice capture begins (default `UP,UP,UP`).
+ - `IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_STEP_DELAY_MS` - per-token delay for the visible-slice normalize script (default `120`).
+ - `IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_POST_DELAY_MS` - extra wait after the visible-slice normalize script (default `260`).
 - `IKA_FULL_SYNC_MAX_PAGES` - maximum roster pages to walk during multi-page full sync (default `64`).
 - `IKA_FULL_SYNC_MAX_STALLED_PAGES` - stop after this many pages add no new agents (default `3`).
 - `IKA_FULL_SYNC_PAGE_ADVANCE_SCRIPT` - key script used to advance to the next roster page during full sync (default `DOWN`).
@@ -109,6 +123,28 @@ Env vars required:
 When no explicit `IKA_EXTRA_SCREEN_CAPTURE_PLAN_*` override is provided, the desktop app now uses the built-in `VISIBLE_SLICE_AGENT_DETAIL_V1` plan. It opens the three visible roster slots one by one, captures their `agent_detail` screens, and returns to the roster slice before the worker call. When richer follow-up captures are present, the host now prefers those `screenCaptures` over the legacy worker-side fullscreen crop path.
 
 For live OCR bring-up there is also a richer opt-in preset, `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA`, which extends each visible slot with `equipment` and `amplifier_detail` captures before returning to the roster slice.
+
+Built-in and custom follow-up capture plans now re-focus the game window before every scripted step and can retry a step when the frame hash does not change after navigation. This is meant to reduce missed keypresses and stray focus loss during unattended live OCR runs.
+
+When a pre-scan script or follow-up capture plan uses pointer commands (`CLICK:` / `DBLCLICK:`), the verifier now prefers soft input lock automatically. This avoids hard `BlockInput` getting in the way of synthetic mouse automation while still forcing the game window to stay focused.
+
+For headless live OCR validation there is a dedicated console tool:
+
+```powershell
+dotnet run --project .\src\VerifierApp.LiveScan\VerifierApp.LiveScan.csproj -c Release -- --locale RU --resolution 1080p --out .\artifacts\live_scan\latest.json
+```
+
+The tool defaults to `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA` plus `IKA_ALLOW_SOFT_INPUT_LOCK=1` for dev/live bring-up. To tune UI navigation without running OCR end-to-end, use probe mode:
+
+```powershell
+dotnet run --project .\src\VerifierApp.LiveScan\VerifierApp.LiveScan.csproj -c Release -- --probe-script "CLICK:0.90:0.05" --probe-out-dir .\artifacts\probe\proxy_tab
+```
+
+There is also a thin wrapper script for the same flow:
+
+```powershell
+.\scripts\smoke_live_ocr.ps1 -Locale RU -Resolution 1080p -OutputPath .\artifacts\live_scan\latest.json
+```
 
 `/verifier/roster/import` also accepts a verifier-linked UID fallback. If OCR cannot extract `uid` from the current screen but the authenticated verifier account is already linked to a UID, the API will use the linked UID instead of rejecting the import immediately.
 
@@ -145,4 +181,5 @@ Notes:
 
 - `agentSlotIndex` is the 1-based visible roster slot, not a canonical `agentId`.
 - `slotIndex` is reserved for disc slot captures (`1..6`) on `disk_detail`.
+- `expectFrameChange` defaults to `true`; set it to `false` only for custom steps that intentionally should not move the UI.
 - `capture=false` executes navigation without saving a screenshot, which is useful for exit/next-agent steps.
