@@ -186,12 +186,17 @@ public sealed class ScanOrchestrator
 
         var maxPages = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_MAX_PAGES", 64);
         var maxStalledPages = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_MAX_STALLED_PAGES", 3);
+        var expectedAgentCount = ReadNonNegativeIntFromEnvironment("IKA_EXPECTED_AGENT_COUNT", 20);
         var initialUpSteps = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_INITIAL_UP_STEPS", 24);
         var initialPostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_INITIAL_POST_DELAY_MS", 400);
-        var pageAdvanceScript = ReadScriptFromEnvironment("IKA_FULL_SYNC_PAGE_ADVANCE_SCRIPT", "DOWN");
+        var initialColumnNormalizeScript = ReadScriptFromEnvironment(
+            "IKA_FULL_SYNC_INITIAL_COLUMN_NORMALIZE_SCRIPT",
+            "LEFT,LEFT"
+        );
+        var pageAdvanceScript = ReadScriptFromEnvironment("IKA_FULL_SYNC_PAGE_ADVANCE_SCRIPT", "WHEEL:-120");
         var pageAdvanceStepDelayMs = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_PAGE_ADVANCE_STEP_DELAY_MS", 120);
-        var pageAdvancePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_PAGE_ADVANCE_POST_DELAY_MS", 320);
-        var pageNormalizeScript = ReadScriptFromEnvironment("IKA_FULL_SYNC_PAGE_NORMALIZE_SCRIPT", "UP,UP");
+        var pageAdvancePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_PAGE_ADVANCE_POST_DELAY_MS", 650);
+        var pageNormalizeScript = ReadScriptFromEnvironment("IKA_FULL_SYNC_PAGE_NORMALIZE_SCRIPT", "LEFT,LEFT");
         var pageNormalizeStepDelayMs = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_PAGE_NORMALIZE_STEP_DELAY_MS", 120);
         var pageNormalizePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_PAGE_NORMALIZE_POST_DELAY_MS", 220);
 
@@ -209,6 +214,17 @@ public sealed class ScanOrchestrator
                     ct
                 );
             }
+        }
+        if (!string.IsNullOrWhiteSpace(initialColumnNormalizeScript))
+        {
+            await ExecuteGameScriptAsync(
+                initialColumnNormalizeScript,
+                pageNormalizeStepDelayMs,
+                pageNormalizePostDelayMs,
+                expectFrameChange: false,
+                failureContext: "full sync normalize roster cursor column before page 1",
+                ct
+            );
         }
 
         var mergedAgents = new Dictionary<string, AgentScanResult>(StringComparer.OrdinalIgnoreCase);
@@ -230,18 +246,6 @@ public sealed class ScanOrchestrator
         for (var pageIndex = 0; pageIndex < maxPages; pageIndex++)
         {
             ct.ThrowIfCancellationRequested();
-
-            if (pageIndex > 0 && !string.IsNullOrWhiteSpace(pageNormalizeScript))
-            {
-                await ExecuteGameScriptAsync(
-                    pageNormalizeScript,
-                    pageNormalizeStepDelayMs,
-                    pageNormalizePostDelayMs,
-                    expectFrameChange: true,
-                    failureContext: $"full sync normalize roster cursor for page {pageIndex + 1}",
-                    ct
-                );
-            }
 
             var pageSessionId = $"{sessionId}-page-{pageIndex + 1:D2}";
             var runtimeCaptures = await CaptureExtraScreensAsync(
@@ -320,6 +324,11 @@ public sealed class ScanOrchestrator
                 reachedTerminalSlice = true;
                 break;
             }
+            if (expectedAgentCount > 0 && mergedAgents.Count >= expectedAgentCount)
+            {
+                reachedTerminalSlice = true;
+                break;
+            }
             if (stalledPages >= maxStalledPages)
             {
                 lowConfReasons.Add("full_sync_stalled_before_terminal_slice");
@@ -334,6 +343,17 @@ public sealed class ScanOrchestrator
             {
                 lowConfReasons.Add("full_sync_page_advance_script_missing");
                 break;
+            }
+            if (!string.IsNullOrWhiteSpace(pageNormalizeScript))
+            {
+                await ExecuteGameScriptAsync(
+                    pageNormalizeScript,
+                    pageNormalizeStepDelayMs,
+                    pageNormalizePostDelayMs,
+                    expectFrameChange: true,
+                    failureContext: $"full sync normalize roster cursor before advancing from page {pageIndex + 1}",
+                    ct
+                );
             }
             await ExecuteGameScriptAsync(
                 pageAdvanceScript,
@@ -1267,20 +1287,8 @@ public sealed class ScanOrchestrator
             return expandedRoot;
         }
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), "ika_verifier");
-        if (HasSufficientFreeSpace(tempRoot, minFreeBytes: 256L * 1024L * 1024L))
-        {
-            Directory.CreateDirectory(tempRoot);
-            return tempRoot;
-        }
-
         foreach (var candidate in EnumerateFallbackRuntimeTempRoots())
         {
-            if (PathsShareDrive(tempRoot, candidate))
-            {
-                continue;
-            }
-
             try
             {
                 Directory.CreateDirectory(candidate);
@@ -1290,6 +1298,13 @@ public sealed class ScanOrchestrator
             {
                 // try the next candidate
             }
+        }
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), "ika_verifier");
+        if (HasSufficientFreeSpace(tempRoot, minFreeBytes: 256L * 1024L * 1024L))
+        {
+            Directory.CreateDirectory(tempRoot);
+            return tempRoot;
         }
 
         Directory.CreateDirectory(tempRoot);
