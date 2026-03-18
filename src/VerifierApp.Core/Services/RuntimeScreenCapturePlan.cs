@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace VerifierApp.Core.Services;
@@ -12,7 +13,8 @@ internal sealed record RuntimeScreenCaptureStep(
     int StepDelayMs = 120,
     int PostDelayMs = 350,
     bool Capture = true,
-    bool ExpectFrameChange = true
+    bool ExpectFrameChange = true,
+    bool RequiresVisibleSliceEntry = false
 );
 
 internal static class RuntimeScreenCapturePlan
@@ -20,6 +22,30 @@ internal static class RuntimeScreenCapturePlan
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string DefaultPreset = "VISIBLE_SLICE_AGENT_DETAIL_V1";
     private const string RichEquipmentPreset = "VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA";
+    private static readonly (double X, double Y)[] AdditionalVisibleAgentGridPoints =
+    [
+        (0.688, 0.197),
+        (0.814, 0.124),
+    ];
+    private static readonly (int SlotIndex, double X, double Y)[] DiskSlotPoints =
+    [
+        (1, 0.632, 0.284),
+        (2, 0.571, 0.487),
+        (3, 0.632, 0.691),
+        (4, 0.825, 0.691),
+        (5, 0.866, 0.487),
+        (6, 0.825, 0.284),
+    ];
+    private const double HomeAgentsIconX = 0.660;
+    private const double HomeAgentsIconY = 0.905;
+    private const double BaseButtonX = 0.606;
+    private const double BaseButtonY = 0.776;
+    private const double EquipmentButtonX = 0.823;
+    private const double EquipmentButtonY = 0.907;
+    private const double AmplifierX = 0.694;
+    private const double AmplifierY = 0.496;
+
+    public static string DefaultVisibleSliceEntryScript => Click(HomeAgentsIconX, HomeAgentsIconY);
 
     public static IReadOnlyList<RuntimeScreenCaptureStep> LoadActivePlan()
     {
@@ -152,172 +178,166 @@ internal static class RuntimeScreenCapturePlan
     }
 
     private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceAgentDetailPlan() =>
-    [
-        new RuntimeScreenCaptureStep(
-            Role: "agent_detail",
-            Script: "ENTER",
-            AgentSlotIndex: 1,
-            ScreenAlias: "agent_1_detail",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: string.Empty,
-            Script: "ESC,DOWN",
-            AgentSlotIndex: 1,
-            ScreenAlias: "move_to_agent_2",
-            StepDelayMs: 120,
-            PostDelayMs: 260,
-            Capture: false
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: "agent_detail",
-            Script: "ENTER",
-            AgentSlotIndex: 2,
-            ScreenAlias: "agent_2_detail",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: string.Empty,
-            Script: "ESC,DOWN",
-            AgentSlotIndex: 2,
-            ScreenAlias: "move_to_agent_3",
-            StepDelayMs: 120,
-            PostDelayMs: 260,
-            Capture: false
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: "agent_detail",
-            Script: "ENTER",
-            AgentSlotIndex: 3,
-            ScreenAlias: "agent_3_detail",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: string.Empty,
-            Script: "ESC",
-            AgentSlotIndex: 3,
-            ScreenAlias: "exit_agent_3_detail",
-            StepDelayMs: 120,
-            PostDelayMs: 200,
-            Capture: false
-        ),
-    ];
+        CreateGameplayAgentGridPlan(includeEquipment: false);
 
     private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceRichEquipmentPlan() =>
-    [
-        new RuntimeScreenCaptureStep(
+        CreateGameplayAgentGridPlan(includeEquipment: true);
+
+    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateGameplayAgentGridPlan(bool includeEquipment)
+    {
+        var steps = new List<RuntimeScreenCaptureStep>();
+        steps.Add(CreateAgentDetailCapture(agentSlotIndex: 1, requiresVisibleSliceEntry: true));
+        if (includeEquipment)
+        {
+            AddEquipmentFlow(steps, agentSlotIndex: 1);
+        }
+        else
+        {
+            AddReturnToAgentGridStep(steps, agentSlotIndex: 1);
+        }
+
+        for (var index = 0; index < AdditionalVisibleAgentGridPoints.Length; index++)
+        {
+            var agentSlotIndex = index + 2;
+            var point = AdditionalVisibleAgentGridPoints[index];
+            steps.Add(
+                new RuntimeScreenCaptureStep(
+                    Role: string.Empty,
+                    Script: Click(point.X, point.Y),
+                    AgentSlotIndex: agentSlotIndex,
+                    ScreenAlias: $"select_agent_{agentSlotIndex}",
+                    StepDelayMs: 120,
+                    PostDelayMs: 900,
+                    Capture: false,
+                    ExpectFrameChange: true,
+                    RequiresVisibleSliceEntry: true
+                )
+            );
+            steps.Add(CreateAgentDetailCapture(agentSlotIndex));
+            if (includeEquipment)
+            {
+                AddEquipmentFlow(steps, agentSlotIndex);
+            }
+            else
+            {
+                AddReturnToAgentGridStep(steps, agentSlotIndex);
+            }
+        }
+
+        steps.Add(
+            new RuntimeScreenCaptureStep(
+                Role: string.Empty,
+                Script: "ESC",
+                AgentSlotIndex: AdditionalVisibleAgentGridPoints.Length + 1,
+                ScreenAlias: "exit_agent_grid",
+                StepDelayMs: 120,
+                PostDelayMs: 240,
+                Capture: false,
+                ExpectFrameChange: true
+            )
+        );
+
+        return steps;
+    }
+
+    private static RuntimeScreenCaptureStep CreateAgentDetailCapture(int agentSlotIndex, bool requiresVisibleSliceEntry = false) =>
+        new(
             Role: "agent_detail",
-            Script: "ENTER",
-            AgentSlotIndex: 1,
-            ScreenAlias: "agent_1_detail",
+            Script: Click(BaseButtonX, BaseButtonY),
+            AgentSlotIndex: agentSlotIndex,
+            ScreenAlias: $"agent_{agentSlotIndex}_detail",
             StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: "equipment",
-            Script: "RIGHT,RIGHT",
-            AgentSlotIndex: 1,
-            ScreenAlias: "agent_1_equipment",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: "amplifier_detail",
-            Script: "ENTER",
-            AgentSlotIndex: 1,
-            ScreenAlias: "agent_1_amplifier",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: string.Empty,
-            Script: "ESC,LEFT,LEFT,ESC,DOWN",
-            AgentSlotIndex: 1,
-            ScreenAlias: "move_to_agent_2",
-            StepDelayMs: 120,
-            PostDelayMs: 260,
-            Capture: false
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: "agent_detail",
-            Script: "ENTER",
-            AgentSlotIndex: 2,
-            ScreenAlias: "agent_2_detail",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: "equipment",
-            Script: "RIGHT,RIGHT",
-            AgentSlotIndex: 2,
-            ScreenAlias: "agent_2_equipment",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: "amplifier_detail",
-            Script: "ENTER",
-            AgentSlotIndex: 2,
-            ScreenAlias: "agent_2_amplifier",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: string.Empty,
-            Script: "ESC,LEFT,LEFT,ESC,DOWN",
-            AgentSlotIndex: 2,
-            ScreenAlias: "move_to_agent_3",
-            StepDelayMs: 120,
-            PostDelayMs: 260,
-            Capture: false
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: "agent_detail",
-            Script: "ENTER",
-            AgentSlotIndex: 3,
-            ScreenAlias: "agent_3_detail",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: "equipment",
-            Script: "RIGHT,RIGHT",
-            AgentSlotIndex: 3,
-            ScreenAlias: "agent_3_equipment",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: "amplifier_detail",
-            Script: "ENTER",
-            AgentSlotIndex: 3,
-            ScreenAlias: "agent_3_amplifier",
-            StepDelayMs: 120,
-            PostDelayMs: 450,
-            Capture: true
-        ),
-        new RuntimeScreenCaptureStep(
-            Role: string.Empty,
-            Script: "ESC,LEFT,LEFT,ESC",
-            AgentSlotIndex: 3,
-            ScreenAlias: "exit_agent_3_amplifier",
-            StepDelayMs: 120,
-            PostDelayMs: 220,
-            Capture: false
-        ),
-    ];
+            PostDelayMs: 1150,
+            Capture: true,
+            ExpectFrameChange: true,
+            RequiresVisibleSliceEntry: requiresVisibleSliceEntry
+        );
+
+    private static void AddEquipmentFlow(ICollection<RuntimeScreenCaptureStep> steps, int agentSlotIndex)
+    {
+        steps.Add(
+            new RuntimeScreenCaptureStep(
+                Role: "equipment",
+                Script: Click(EquipmentButtonX, EquipmentButtonY),
+                AgentSlotIndex: agentSlotIndex,
+                ScreenAlias: $"agent_{agentSlotIndex}_equipment",
+                StepDelayMs: 120,
+                PostDelayMs: 900,
+                Capture: true,
+                ExpectFrameChange: true
+            )
+        );
+        steps.Add(
+            new RuntimeScreenCaptureStep(
+                Role: "amplifier_detail",
+                Script: Click(AmplifierX, AmplifierY),
+                AgentSlotIndex: agentSlotIndex,
+                ScreenAlias: $"agent_{agentSlotIndex}_amplifier",
+                StepDelayMs: 120,
+                PostDelayMs: 900,
+                Capture: true,
+                ExpectFrameChange: true
+            )
+        );
+        steps.Add(
+            new RuntimeScreenCaptureStep(
+                Role: string.Empty,
+                Script: "ESC",
+                AgentSlotIndex: agentSlotIndex,
+                ScreenAlias: $"exit_agent_{agentSlotIndex}_amplifier",
+                StepDelayMs: 120,
+                PostDelayMs: 280,
+                Capture: false,
+                ExpectFrameChange: true
+            )
+        );
+        foreach (var (slotIndex, x, y) in DiskSlotPoints)
+        {
+            steps.Add(
+                new RuntimeScreenCaptureStep(
+                    Role: "disk_detail",
+                    Script: Click(x, y),
+                    AgentSlotIndex: agentSlotIndex,
+                    SlotIndex: slotIndex,
+                    ScreenAlias: $"agent_{agentSlotIndex}_disk_{slotIndex}",
+                    StepDelayMs: 120,
+                    PostDelayMs: 950,
+                    Capture: true,
+                    ExpectFrameChange: true
+                )
+            );
+            steps.Add(
+                new RuntimeScreenCaptureStep(
+                    Role: string.Empty,
+                    Script: "ESC",
+                    AgentSlotIndex: agentSlotIndex,
+                    ScreenAlias: $"exit_agent_{agentSlotIndex}_disk_{slotIndex}",
+                    StepDelayMs: 120,
+                    PostDelayMs: 700,
+                    Capture: false,
+                    ExpectFrameChange: true
+                )
+            );
+        }
+        AddReturnToAgentGridStep(steps, agentSlotIndex);
+    }
+
+    private static void AddReturnToAgentGridStep(ICollection<RuntimeScreenCaptureStep> steps, int agentSlotIndex)
+    {
+        steps.Add(
+            new RuntimeScreenCaptureStep(
+                Role: string.Empty,
+                Script: "ESC",
+                AgentSlotIndex: agentSlotIndex,
+                ScreenAlias: $"return_to_agent_grid_{agentSlotIndex}",
+                StepDelayMs: 120,
+                PostDelayMs: 380,
+                Capture: false,
+                ExpectFrameChange: true
+            )
+        );
+    }
+
+    private static string Click(double x, double y) =>
+        $"CLICK:{x.ToString("0.000", CultureInfo.InvariantCulture)}:{y.ToString("0.000", CultureInfo.InvariantCulture)}";
 }

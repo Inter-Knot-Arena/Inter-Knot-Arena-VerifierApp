@@ -7,6 +7,7 @@ public sealed class ScanOrchestrator
     private readonly IVerifierApiClient? _apiClient;
     private readonly IWorkerClient _worker;
     private readonly INativeBridge _nativeBridge;
+    private const string DefaultLiveEntryScript = "ESC,ESC";
 
     public ScanOrchestrator(
         IVerifierApiClient apiClient,
@@ -44,12 +45,18 @@ public sealed class ScanOrchestrator
             var scanScript = Environment.GetEnvironmentVariable("IKA_SCAN_SCRIPT");
             if (string.IsNullOrWhiteSpace(scanScript))
             {
-                scanScript = "ESC,TAB,TAB,ENTER";
+                scanScript = DefaultLiveEntryScript;
             }
             var preferSoftInputLock = ScriptUsesPointerInput(scanScript) ||
                                       RuntimeScreenCapturePlan.LoadActivePlan().Any(step => ScriptUsesPointerInput(step.Script));
-            var scanStepDelayMs = ReadPositiveIntFromEnvironment("IKA_SCAN_SCRIPT_STEP_DELAY_MS", 120);
-            var scanPostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_SCAN_SCRIPT_POST_DELAY_MS", 250);
+            var scanStepDelayMs = ReadPositiveIntFromEnvironment(
+                "IKA_SCAN_SCRIPT_STEP_DELAY_MS",
+                string.Equals(scanScript, DefaultLiveEntryScript, StringComparison.OrdinalIgnoreCase) ? 500 : 120
+            );
+            var scanPostDelayMs = ReadNonNegativeIntFromEnvironment(
+                "IKA_SCAN_SCRIPT_POST_DELAY_MS",
+                string.Equals(scanScript, DefaultLiveEntryScript, StringComparison.OrdinalIgnoreCase) ? 1600 : 550
+            );
             var locked = _nativeBridge.TryLockInput(preferSoftInputLock);
             if (!locked)
             {
@@ -125,7 +132,9 @@ public sealed class ScanOrchestrator
         CancellationToken ct
     )
     {
-        var normalizeScript = ReadScriptFromEnvironment("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_SCRIPT", "UP,UP,UP");
+        await EnsureVisibleSliceRosterEntryAsync(ct);
+
+        var normalizeScript = ReadScriptFromEnvironment("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_SCRIPT", string.Empty);
         var normalizeStepDelayMs = ReadPositiveIntFromEnvironment("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_STEP_DELAY_MS", 120);
         var normalizePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_POST_DELAY_MS", 260);
         if (!string.IsNullOrWhiteSpace(normalizeScript))
@@ -160,6 +169,8 @@ public sealed class ScanOrchestrator
         CancellationToken ct
     )
     {
+        await EnsureVisibleSliceRosterEntryAsync(ct);
+
         var maxPages = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_MAX_PAGES", 64);
         var maxStalledPages = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_MAX_STALLED_PAGES", 3);
         var initialUpSteps = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_INITIAL_UP_STEPS", 24);
@@ -434,6 +445,10 @@ public sealed class ScanOrchestrator
         {
             ct.ThrowIfCancellationRequested();
             var step = plan[index];
+            if (step.RequiresVisibleSliceEntry)
+            {
+                await EnsureVisibleSliceRosterEntryAsync(ct);
+            }
             await ExecuteGameScriptAsync(
                 step.Script ?? string.Empty,
                 step.StepDelayMs,
@@ -482,6 +497,12 @@ public sealed class ScanOrchestrator
         string failureMessage = "Scan aborted: game window could not be focused."
     )
     {
+        var status = _nativeBridge.InspectGameWindowStatus();
+        if (!status.CanInjectInput)
+        {
+            throw new InvalidOperationException(BuildGameWindowFailureMessage(status));
+        }
+
         if (!_nativeBridge.TryFocusGameWindow())
         {
             throw new InvalidOperationException(failureMessage);
@@ -492,6 +513,132 @@ public sealed class ScanOrchestrator
         {
             await Task.Delay(refocusDelayMs, ct);
         }
+    }
+
+    private static string BuildGameWindowFailureMessage(GameWindowStatus status)
+    {
+        return status.BlockingIssue switch
+        {
+            "game_process_not_found" => "Scan aborted: ZenlessZoneZero process was not found.",
+            "game_window_missing" => "Scan aborted: game window is not available.",
+            "game_requires_elevated_verifier" =>
+                "Scan aborted: ZenlessZoneZero is running as administrator. Start VerifierApp as administrator too.",
+            _ => "Scan aborted: game window is not ready for live input."
+        };
+    }
+
+    private async Task EnsureVisibleSliceRosterEntryAsync(CancellationToken ct)
+    {
+        var entryScript = ReadScriptFromEnvironment(
+            "IKA_VISIBLE_SLICE_ENTRY_SCRIPT",
+            RuntimeScreenCapturePlan.DefaultVisibleSliceEntryScript
+        );
+        if (string.IsNullOrWhiteSpace(entryScript))
+        {
+            return;
+        }
+
+        var entryStepDelayMs = ReadPositiveIntFromEnvironment("IKA_VISIBLE_SLICE_ENTRY_STEP_DELAY_MS", 120);
+        var entryPostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_VISIBLE_SLICE_ENTRY_POST_DELAY_MS", 1100);
+        var entryStabilizeDelayMs = ReadNonNegativeIntFromEnvironment("IKA_VISIBLE_SLICE_ENTRY_STABILIZE_DELAY_MS", 650);
+        var recoveryScript = ReadScriptFromEnvironment("IKA_VISIBLE_SLICE_ENTRY_RECOVERY_SCRIPT", "ESC,ESC");
+        var recoveryMaxAttempts = ReadPositiveIntFromEnvironment("IKA_VISIBLE_SLICE_ENTRY_RECOVERY_MAX_ATTEMPTS", 5);
+        var recoveryStepDelayMs = ReadPositiveIntFromEnvironment("IKA_VISIBLE_SLICE_ENTRY_RECOVERY_STEP_DELAY_MS", 500);
+        var recoveryPostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_VISIBLE_SLICE_ENTRY_RECOVERY_POST_DELAY_MS", 1600);
+
+        for (var attempt = 0; attempt < recoveryMaxAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await EnsureGameFocusedAsync(ct);
+            var stateProbePath = await CaptureVisibleSliceStateProbeAsync(attempt + 1, ct);
+            if (LiveUiDetector.LooksLikeHomeScreen(stateProbePath) &&
+                await TryExecuteGameScriptAsync(entryScript, entryStepDelayMs, entryPostDelayMs, expectFrameChange: true, ct))
+            {
+                if (entryStabilizeDelayMs > 0)
+                {
+                    await Task.Delay(entryStabilizeDelayMs, ct);
+                }
+                return;
+            }
+
+            if (attempt == recoveryMaxAttempts - 1 || string.IsNullOrWhiteSpace(recoveryScript))
+            {
+                break;
+            }
+
+            await TryExecuteGameScriptAsync(
+                recoveryScript,
+                recoveryStepDelayMs,
+                recoveryPostDelayMs,
+                expectFrameChange: false,
+                ct
+            );
+        }
+
+        if (await TryExecuteGameScriptAsync(entryScript, entryStepDelayMs, entryPostDelayMs, expectFrameChange: true, ct))
+        {
+            if (entryStabilizeDelayMs > 0)
+            {
+                await Task.Delay(entryStabilizeDelayMs, ct);
+            }
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "Scan aborted: could not reach the agent roster screen from the current live UI state."
+        );
+    }
+
+    private async Task<string> CaptureVisibleSliceStateProbeAsync(int attempt, CancellationToken ct)
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "ika_verifier", "entry_state");
+        Directory.CreateDirectory(tempRoot);
+        var captureAttempts = ReadPositiveIntFromEnvironment("IKA_GAME_CAPTURE_FILE_MAX_ATTEMPTS", 3);
+        var readyDelayMs = ReadNonNegativeIntFromEnvironment("IKA_GAME_CAPTURE_FILE_READY_DELAY_MS", 60);
+
+        for (var captureAttempt = 1; captureAttempt <= captureAttempts; captureAttempt++)
+        {
+            var path = Path.Combine(tempRoot, $"visible_slice_entry_{attempt:D2}_{Guid.NewGuid():N}.png");
+            if (!_nativeBridge.CaptureGameWindowPng(path))
+            {
+                continue;
+            }
+
+            var fileReadyAttempts = ReadPositiveIntFromEnvironment("IKA_GAME_CAPTURE_FILE_READY_MAX_ATTEMPTS", 8);
+            for (var readyAttempt = 0; readyAttempt < fileReadyAttempts; readyAttempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (File.Exists(path))
+                {
+                    var length = new FileInfo(path).Length;
+                    if (length > 0)
+                    {
+                        return path;
+                    }
+                }
+
+                if (readyDelayMs > 0)
+                {
+                    await Task.Delay(readyDelayMs, ct);
+                }
+            }
+
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Scan aborted: failed to capture the game window while normalizing live UI state."
+        );
     }
 
     private async Task ExecuteGameScriptAsync(
@@ -560,6 +707,45 @@ public sealed class ScanOrchestrator
                 await Task.Delay(retryDelayMs, ct);
             }
         }
+    }
+
+    private async Task<bool> TryExecuteGameScriptAsync(
+        string script,
+        int stepDelayMs,
+        int postDelayMs,
+        bool expectFrameChange,
+        CancellationToken ct
+    )
+    {
+        if (string.IsNullOrWhiteSpace(script))
+        {
+            return true;
+        }
+
+        await EnsureGameFocusedAsync(ct);
+        var beforeHash = expectFrameChange ? NormalizeFrameHash(_nativeBridge.CaptureFrameHash()) : string.Empty;
+        if (!_nativeBridge.ExecuteScanScript(script, stepDelayMs))
+        {
+            return false;
+        }
+
+        if (postDelayMs > 0)
+        {
+            await Task.Delay(postDelayMs, ct);
+        }
+
+        if (!expectFrameChange)
+        {
+            return true;
+        }
+
+        var afterHash = NormalizeFrameHash(_nativeBridge.CaptureFrameHash());
+        if (string.IsNullOrWhiteSpace(beforeHash) || string.IsNullOrWhiteSpace(afterHash))
+        {
+            return false;
+        }
+
+        return !string.Equals(beforeHash, afterHash, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeFrameHash(string? value) =>

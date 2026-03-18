@@ -31,14 +31,14 @@ Desktop verifier for Inter-Knot Arena with:
 7. Worker executes `ocr.scan`, `cv.precheck`, `cv.inrun`.
 8. Native module provides OS-level input lock and real desktop frame hash capture.
 9. Bundled OCR/CV zip packages are integrity-checked and extracted before worker startup.
-10. Before OCR scan, native scan script is executed (`ESC,TAB,TAB,ENTER` by default) under active input lock.
+10. Before OCR scan, a native pre-scan script can be executed under active input lock. The built-in live default is `ESC,ESC`, and visible-slice navigation then uses a dedicated state-recovery path to normalize into the home/menu screen before opening `Agents`.
 11. Worker/CV capture path uses DXGI (`dxcam`) first for fullscreen compatibility, with safe fallback.
 
 ## Current OCR capability
 
-- The bundled OCR worker reads UID plus the visible roster slice and can ingest richer follow-up captures (`agent_detail`, `amplifier_detail`, `disk_detail`) when supplied.
+- The bundled OCR worker reads UID plus the visible roster slice and can ingest richer follow-up captures (`agent_detail`, `equipment`, `amplifier_detail`, `disk_detail`) when supplied.
 - The desktop app includes a guarded multi-page full-sync path. It only performs destructive overwrite when terminal-slice coverage is confirmed via `capabilities.fullRosterCoverage=true`.
-- Built-in follow-up capture currently focuses on `agent_detail` screens for the visible slots; equipment fields are preserved from previous imports unless richer captures are available.
+- The richer visible-slice preset now captures `agent_detail`, `equipment`, `amplifier_detail`, and `disk_detail` for the three visible slots and feeds them into OCR as page-aware `screenCaptures`.
 
 ## Build prerequisites
 
@@ -98,9 +98,9 @@ Env vars required:
 
 ## Optional runtime env vars
 
- - `IKA_SCAN_SCRIPT` - comma-separated pre-scan navigation script (`ESC,TAB,TAB,ENTER` by default). Supports key tokens plus `WAIT:ms`, `CLICK:x:y`, and `DBLCLICK:x:y`. If both coordinates are in `0..1`, they are treated as normalized coordinates inside the focused game window.
-- `IKA_SCAN_SCRIPT_STEP_DELAY_MS` - delay between key presses for `IKA_SCAN_SCRIPT` (default `120`).
- - `IKA_SCAN_SCRIPT_POST_DELAY_MS` - extra wait after the pre-scan script completes (default `250`).
+- `IKA_SCAN_SCRIPT` - optional comma-separated pre-scan navigation script (`ESC,ESC` by default for live OCR). Supports key tokens plus `WAIT:ms`, `CLICK:x:y`, and `DBLCLICK:x:y`. If both coordinates are in `0..1`, they are treated as normalized coordinates inside the focused game window.
+- `IKA_SCAN_SCRIPT_STEP_DELAY_MS` - delay between key presses for `IKA_SCAN_SCRIPT` (default `500` for the built-in `ESC,ESC` live normalize script, otherwise `120`).
+ - `IKA_SCAN_SCRIPT_POST_DELAY_MS` - extra wait after the pre-scan script completes (default `1600` for the built-in `ESC,ESC` live normalize script, otherwise `550`).
 - `IKA_GAME_PROCESS_NAME` - process name used when auto-focusing the game before scan (`ZenlessZoneZero` by default).
 - `IKA_GAME_WINDOW_TITLE` - optional window-title hint used to prefer the correct game window.
 - `IKA_GAME_FOCUS_DELAY_MS` - extra wait after the game window is focused (default `250`).
@@ -110,10 +110,17 @@ Env vars required:
 - `IKA_CAPTURE_OUTPUT_IDX` - monitor index for fullscreen DXGI capture (`0` by default).
 - `IKA_CAPTURE_STEP_MAX_ATTEMPTS` - maximum attempts for each live OCR automation step before aborting (`2` by default).
 - `IKA_CAPTURE_STEP_RETRY_DELAY_MS` - delay between failed live OCR automation attempts (`180` by default).
-- `IKA_DEFAULT_OCR_CAPTURE_PLAN` - built-in OCR capture preset. Default is `VISIBLE_SLICE_AGENT_DETAIL_V1`; set to `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA` to try richer `equipment/amplifier_detail` follow-up captures, or `OFF` to disable built-in follow-up captures.
+- `IKA_DEFAULT_OCR_CAPTURE_PLAN` - built-in OCR capture preset. Default is `VISIBLE_SLICE_AGENT_DETAIL_V1`; set to `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA` to enable richer `equipment/amplifier_detail/disk_detail` follow-up captures, or `OFF` to disable built-in follow-up captures.
+- `IKA_VISIBLE_SLICE_ENTRY_SCRIPT` - primary live entry step used before visible-slice OCR capture (default is a click on the home-screen `Agents` icon).
+- `IKA_VISIBLE_SLICE_ENTRY_STEP_DELAY_MS` - per-token delay for the visible-slice entry script (default `120`).
+- `IKA_VISIBLE_SLICE_ENTRY_POST_DELAY_MS` - extra wait after the visible-slice entry script (default `1100`).
+- `IKA_VISIBLE_SLICE_ENTRY_RECOVERY_SCRIPT` - recovery navigation used when the direct entry step does not work (default `ESC,ESC`).
+- `IKA_VISIBLE_SLICE_ENTRY_RECOVERY_MAX_ATTEMPTS` - maximum number of recovery cycles before visible-slice OCR aborts (default `5`).
+- `IKA_VISIBLE_SLICE_ENTRY_RECOVERY_STEP_DELAY_MS` - per-token delay for the recovery script (default `500`).
+- `IKA_VISIBLE_SLICE_ENTRY_RECOVERY_POST_DELAY_MS` - extra wait after the recovery script (default `1600`).
 - `IKA_EXTRA_SCREEN_CAPTURE_PLAN_JSON` - optional JSON array of follow-up captures executed under active input lock.
 - `IKA_EXTRA_SCREEN_CAPTURE_PLAN_PATH` - optional path to the same JSON capture plan; used when the inline env var is empty.
- - `IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_SCRIPT` - optional script used before built-in visible-slice capture begins (default `UP,UP,UP`).
+- `IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_SCRIPT` - optional script used before built-in visible-slice capture begins (default empty).
  - `IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_STEP_DELAY_MS` - per-token delay for the visible-slice normalize script (default `120`).
  - `IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_POST_DELAY_MS` - extra wait after the visible-slice normalize script (default `260`).
 - `IKA_FULL_SYNC_MAX_PAGES` - maximum roster pages to walk during multi-page full sync (default `64`).
@@ -123,22 +130,23 @@ Env vars required:
 
 When no explicit `IKA_EXTRA_SCREEN_CAPTURE_PLAN_*` override is provided, the desktop app now uses the built-in `VISIBLE_SLICE_AGENT_DETAIL_V1` plan. It opens the three visible roster slots one by one, captures their `agent_detail` screens, and returns to the roster slice before the worker call. When richer follow-up captures are present, the host now prefers those `screenCaptures` over the legacy worker-side fullscreen crop path.
 
-For live OCR bring-up there is also a richer opt-in preset, `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA`, which extends each visible slot with `equipment` and `amplifier_detail` captures before returning to the roster slice.
+For live OCR bring-up there is also a richer opt-in preset, `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA`, which extends each visible slot with `equipment`, `amplifier_detail`, and `disk_detail` captures before returning to the roster slice.
 
 Built-in and custom follow-up capture plans now re-focus the game window before every scripted step and can retry a step when the frame hash does not change after navigation. The frame hash is now derived from the captured game window first, with a desktop fallback only when window capture fails. This is meant to reduce missed keypresses, false retries, and stray focus loss during unattended live OCR runs.
 
 When a pre-scan script or follow-up capture plan uses pointer commands (`CLICK:` / `DBLCLICK:`), the verifier now prefers soft input lock automatically. This avoids hard `BlockInput` getting in the way of synthetic mouse automation while still forcing the game window to stay focused.
 
-For headless live OCR validation there is a dedicated console tool:
+For headless live OCR validation there is a dedicated console tool. Build it first, then run the compiled `.exe`:
 
 ```powershell
-dotnet run --project .\src\VerifierApp.LiveScan\VerifierApp.LiveScan.csproj -c Release -- --locale RU --resolution 1080p --out .\artifacts\live_scan\latest.json
+dotnet build .\src\VerifierApp.LiveScan\VerifierApp.LiveScan.csproj -c Release
+.\src\VerifierApp.LiveScan\bin\Release\net10.0-windows\VerifierApp.LiveScan.exe --locale RU --resolution 1080p --out .\artifacts\live_scan\latest.json
 ```
 
-The tool defaults to `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA`, `IKA_ALLOW_SOFT_INPUT_LOCK=1`, and `IKA_KEY_SCRIPT_BACKEND=managed` for dev/live bring-up. To tune UI navigation without running OCR end-to-end, use probe mode:
+The tool defaults to `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA`, `IKA_ALLOW_SOFT_INPUT_LOCK=1`, `IKA_KEY_SCRIPT_BACKEND=native`, and the built-in `ESC,ESC` live normalize script for bring-up. To tune UI navigation without running OCR end-to-end, use probe mode:
 
 ```powershell
-dotnet run --project .\src\VerifierApp.LiveScan\VerifierApp.LiveScan.csproj -c Release -- --probe-script "CLICK:0.90:0.05" --probe-out-dir .\artifacts\probe\proxy_tab
+.\src\VerifierApp.LiveScan\bin\Release\net10.0-windows\VerifierApp.LiveScan.exe --probe-script "CLICK:0.90:0.05" --probe-out-dir .\artifacts\probe\proxy_tab
 ```
 
 There is also a thin wrapper script for the same flow:
@@ -146,6 +154,8 @@ There is also a thin wrapper script for the same flow:
 ```powershell
 .\scripts\smoke_live_ocr.ps1 -Locale RU -Resolution 1080p -OutputPath .\artifacts\live_scan\latest.json
 ```
+
+If `ZenlessZoneZero` is running as administrator, launch `VerifierApp` / `VerifierApp.LiveScan` as administrator too. Windows UIPI blocks a non-elevated verifier process from injecting live input into an elevated game window, which otherwise looks like dead `ESC` / `C` / `CLICK` automation.
 
 `/verifier/roster/import` also accepts a verifier-linked UID fallback. If OCR cannot extract `uid` from the current screen but the authenticated verifier account is already linked to a UID, the API will use the linked UID instead of rejecting the import immediately.
 
