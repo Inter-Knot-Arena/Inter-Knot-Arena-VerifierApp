@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.Text.Json;
 using VerifierApp.Core.Services;
 using VerifierApp.WorkerHost;
@@ -53,6 +54,7 @@ internal static class Program
                 workerExecutablePath: workerLaunch.ExecutablePath,
                 pipeName: options.PipeName,
                 extraArguments: workerLaunch.ExtraArguments,
+                pathPrependDirectory: workerLaunch.PathPrependDirectory,
                 ocrRoot: ocrRoot,
                 cvRoot: cvRoot
             );
@@ -225,10 +227,12 @@ internal static class Program
         if (!string.IsNullOrWhiteSpace(workerMain))
         {
             var workerPython = ResolvePreferredWorkerPython(repoRoot, explicitPython);
-            if (!string.IsNullOrWhiteSpace(workerPython))
+            if (workerPython is not null)
             {
-                return new WorkerLaunch(workerPython, $"\"{workerMain}\"");
+                return new WorkerLaunch(workerPython.ExecutablePath, $"\"{workerMain}\"", workerPython.PathPrependDirectory);
             }
+
+            throw new InvalidOperationException("Could not find a CUDA-capable worker Python with onnxruntime-gpu and torch.");
         }
 
         var workerExe = ResolveRequiredFile(
@@ -236,11 +240,15 @@ internal static class Program
             Path.Combine(repoRoot, "worker", "dist", "VerifierWorker.exe"),
             Path.Combine(repoRoot, "src", "VerifierApp.UI", "Bundled", "VerifierWorker.exe")
         );
-        return new WorkerLaunch(workerExe, null);
+        return new WorkerLaunch(workerExe, null, null);
     }
 
-    private static string? ResolvePreferredWorkerPython(string repoRoot, string? explicitPython)
+    private static WorkerPythonLaunch? ResolvePreferredWorkerPython(string repoRoot, string? explicitPython)
     {
+        var probeModelPath = ResolveOptionalFile(
+            Path.Combine(repoRoot, "external", "OCR_Scan", "models", "uid_digit.onnx"),
+            Path.Combine(repoRoot, "external", "CV", "models", "cv_agent_icon.onnx")
+        );
         var pythonCandidates = new[]
         {
             explicitPython,
@@ -262,40 +270,66 @@ internal static class Program
                 continue;
             }
 
-            if (SupportsCudaWorkerPython(resolved))
+            var torchLibDirectory = ResolvePythonTorchLibDirectory(resolved);
+            if (SupportsCudaWorkerPython(resolved, torchLibDirectory, probeModelPath))
             {
-                return resolved;
-            }
-        }
-
-        foreach (var candidate in pythonCandidates)
-        {
-            var resolved = ResolveOptionalFile(candidate);
-            if (!string.IsNullOrWhiteSpace(resolved))
-            {
-                return resolved;
+                return new WorkerPythonLaunch(resolved, torchLibDirectory);
             }
         }
 
         return null;
     }
 
-    private static bool SupportsCudaWorkerPython(string pythonExecutablePath)
+    private static bool SupportsCudaWorkerPython(string pythonExecutablePath, string? torchLibDirectory, string? probeModelPath)
     {
+        if (string.IsNullOrWhiteSpace(torchLibDirectory))
+        {
+            return false;
+        }
+
+        var scriptPath = Path.Combine(Path.GetTempPath(), $"verifier_cuda_probe_{Guid.NewGuid():N}.py");
         try
         {
+            var modelPathLiteral = string.IsNullOrWhiteSpace(probeModelPath)
+                ? "None"
+                : ToPythonStringLiteral(probeModelPath);
+            var torchLibLiteral = ToPythonStringLiteral(torchLibDirectory);
+            var script = string.Join(Environment.NewLine, new[]
+            {
+                "import onnxruntime as ort",
+                $"model_path = {modelPathLiteral}",
+                "try:",
+                "    from onnxruntime import datasets as ort_datasets",
+                "    example = ort_datasets.get_example('sigmoid.onnx')",
+                "    if example:",
+                "        model_path = example",
+                "except Exception:",
+                "    pass",
+                "",
+                "if model_path is None:",
+                "    raise RuntimeError('No probe model available.')",
+                "",
+                "if hasattr(ort, 'preload_dlls'):",
+                $"    ort.preload_dlls(directory={torchLibLiteral})",
+                "",
+                "session = ort.InferenceSession(model_path, providers=['CUDAExecutionProvider'])",
+                "providers = session.get_providers()",
+                "if 'CUDAExecutionProvider' not in providers:",
+                "    raise RuntimeError(f'CUDAExecutionProvider not active: {providers!r}')",
+                "print('READY')"
+            });
+            File.WriteAllText(scriptPath, script);
+
             var startInfo = new ProcessStartInfo
             {
                 FileName = pythonExecutablePath,
-                Arguments =
-                    "-c \"import importlib.util, onnxruntime as ort, torch; " +
-                    "ready=('CUDAExecutionProvider' in ort.get_available_providers()) and bool(torch.cuda.is_available()); " +
-                    "print('READY' if ready else 'NOT_READY')\"",
+                Arguments = $"\"{scriptPath}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
+            PrependDirectoryToPath(startInfo.Environment, torchLibDirectory);
 
             using var process = Process.Start(startInfo);
             if (process is null)
@@ -324,6 +358,46 @@ internal static class Program
         {
             return false;
         }
+        finally
+        {
+            try
+            {
+                if (File.Exists(scriptPath))
+                {
+                    File.Delete(scriptPath);
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+    }
+
+    private static string? ResolvePythonTorchLibDirectory(string pythonExecutablePath)
+    {
+        var pythonDirectory = Path.GetDirectoryName(pythonExecutablePath);
+        if (string.IsNullOrWhiteSpace(pythonDirectory))
+        {
+            return null;
+        }
+
+        var candidateRoots = new[]
+        {
+            pythonDirectory,
+            Directory.GetParent(pythonDirectory)?.FullName
+        };
+
+        foreach (var candidateRoot in candidateRoots.Where(static root => !string.IsNullOrWhiteSpace(root)))
+        {
+            var torchLibDirectory = Path.GetFullPath(Path.Combine(candidateRoot!, "Lib", "site-packages", "torch", "lib"));
+            if (Directory.Exists(torchLibDirectory))
+            {
+                return torchLibDirectory;
+            }
+        }
+
+        return null;
     }
 
     private static string ResolveNativeDll(string repoRoot) =>
@@ -399,17 +473,39 @@ internal static class Program
         }
 
         var currentPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        var parts = currentPath
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Any(part => string.Equals(part, directoryPath, StringComparison.OrdinalIgnoreCase)))
+        Environment.SetEnvironmentVariable("PATH", UpdatePathValue(currentPath, directoryPath));
+    }
+
+    private static void PrependDirectoryToPath(IDictionary<string, string?> environment, string? directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath))
         {
             return;
         }
 
-        var updated = string.IsNullOrWhiteSpace(currentPath)
+        var currentPath = environment.TryGetValue("PATH", out var existing) && !string.IsNullOrWhiteSpace(existing)
+            ? existing
+            : Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        environment["PATH"] = UpdatePathValue(currentPath, directoryPath);
+    }
+
+    private static string UpdatePathValue(string currentPath, string directoryPath)
+    {
+        var parts = currentPath
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Any(part => string.Equals(part, directoryPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            return currentPath;
+        }
+
+        return string.IsNullOrWhiteSpace(currentPath)
             ? directoryPath
             : directoryPath + Path.PathSeparator + currentPath;
-        Environment.SetEnvironmentVariable("PATH", updated);
+    }
+
+    private static string ToPythonStringLiteral(string value)
+    {
+        return "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
     }
 
     private static void EnsureProcessEnvironmentDefault(string name, string value)
@@ -566,6 +662,12 @@ internal static class Program
 
     private sealed record WorkerLaunch(
         string ExecutablePath,
-        string? ExtraArguments
+        string? ExtraArguments,
+        string? PathPrependDirectory
+    );
+
+    private sealed record WorkerPythonLaunch(
+        string ExecutablePath,
+        string? PathPrependDirectory
     );
 }

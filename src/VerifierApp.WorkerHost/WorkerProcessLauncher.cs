@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Generic;
 
 namespace VerifierApp.WorkerHost;
 
@@ -10,6 +11,7 @@ public sealed class WorkerProcessLauncher : IDisposable
         string workerExecutablePath,
         string pipeName = "ika_verifier_worker",
         string? extraArguments = null,
+        string? pathPrependDirectory = null,
         string? bundleRoot = null,
         string? ocrRoot = null,
         string? cvRoot = null
@@ -42,6 +44,7 @@ public sealed class WorkerProcessLauncher : IDisposable
         {
             startInfo.Environment["IKA_CV_ROOT"] = cvRoot;
         }
+        PrependDirectoryToPath(startInfo.Environment, pathPrependDirectory);
 
         _process = Process.Start(startInfo)
                    ?? throw new InvalidOperationException("Failed to start worker process");
@@ -70,5 +73,27 @@ public sealed class WorkerProcessLauncher : IDisposable
             _process.Dispose();
             _process = null;
         }
+    }
+
+    private static void PrependDirectoryToPath(IDictionary<string, string?> environment, string? directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath))
+        {
+            return;
+        }
+
+        var currentPath = environment.TryGetValue("PATH", out var existing) && !string.IsNullOrWhiteSpace(existing)
+            ? existing
+            : Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        var parts = currentPath
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Any(part => string.Equals(part, directoryPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        environment["PATH"] = string.IsNullOrWhiteSpace(currentPath)
+            ? directoryPath
+            : directoryPath + Path.PathSeparator + currentPath;
     }
 }
