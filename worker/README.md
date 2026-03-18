@@ -25,6 +25,7 @@ Runtime dependencies:
 - CV package path from `IKA_CV_ROOT` or bundle extraction directory.
 - Bundle root is provided by host via `IKA_BUNDLE_ROOT`.
 - Capture backend: `dxcam` (DXGI) first for fullscreen support, `PIL.ImageGrab` fallback.
+- OCR runtime is CUDA-only. The worker venv must provide `onnxruntime-gpu` and `torch`; `onnxruntime-directml` is not sufficient for live OCR.
 
 Optional env vars:
 

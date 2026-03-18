@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using VerifierApp.Core.Services;
 using VerifierApp.WorkerHost;
@@ -26,7 +27,7 @@ internal static class Program
             var repoRoot = ResolveRepoRoot(options.RepoRoot);
             EnsureProcessEnvironmentDefault("IKA_ALLOW_SOFT_INPUT_LOCK", "1");
             EnsureProcessEnvironmentDefault("IKA_DEFAULT_OCR_CAPTURE_PLAN", "VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA");
-            EnsureProcessEnvironmentDefault("IKA_KEY_SCRIPT_BACKEND", "managed");
+            EnsureProcessEnvironmentDefault("IKA_KEY_SCRIPT_BACKEND", "native");
             var nativeDll = ResolveNativeDll(repoRoot);
             PrependDirectoryToPath(Path.GetDirectoryName(nativeDll));
 
@@ -38,13 +39,13 @@ internal static class Program
             var workerLaunch = ResolveWorkerLaunch(repoRoot);
             var ocrRoot = ResolveOptionalDirectory(
                 Environment.GetEnvironmentVariable("IKA_OCR_SCAN_ROOT"),
-                Path.Combine(repoRoot, "external", "OCR_Scan"),
-                Path.Combine(Path.GetDirectoryName(repoRoot) ?? repoRoot, "Inter-Knot Arena OCR_Scan")
+                Path.Combine(Path.GetDirectoryName(repoRoot) ?? repoRoot, "Inter-Knot Arena OCR_Scan"),
+                Path.Combine(repoRoot, "external", "OCR_Scan")
             );
             var cvRoot = ResolveOptionalDirectory(
                 Environment.GetEnvironmentVariable("IKA_CV_ROOT"),
-                Path.Combine(repoRoot, "external", "CV"),
-                Path.Combine(Path.GetDirectoryName(repoRoot) ?? repoRoot, "Inter-Knot Arena CV")
+                Path.Combine(Path.GetDirectoryName(repoRoot) ?? repoRoot, "Inter-Knot Arena CV"),
+                Path.Combine(repoRoot, "external", "CV")
             );
 
             using var launcher = new WorkerProcessLauncher();
@@ -106,6 +107,12 @@ internal static class Program
     private static async Task<int> RunProbeAsync(Options options, CancellationToken ct)
     {
         var nativeBridge = new NativeBridge();
+        var status = nativeBridge.InspectGameWindowStatus();
+        if (!status.CanInjectInput)
+        {
+            throw new InvalidOperationException(FormatGameWindowStatusFailure(status));
+        }
+
         if (!nativeBridge.TryFocusGameWindow())
         {
             throw new InvalidOperationException("Could not focus game window for probe.");
@@ -146,6 +153,7 @@ internal static class Program
             mode = "probe",
             script = options.ProbeScript,
             executed = scriptExecuted,
+            gameWindowStatus = status,
             beforePath,
             afterPath
         };
@@ -163,6 +171,18 @@ internal static class Program
 
         Console.WriteLine(json);
         return scriptExecuted ? 0 : 2;
+    }
+
+    private static string FormatGameWindowStatusFailure(GameWindowStatus status)
+    {
+        return status.BlockingIssue switch
+        {
+            "game_process_not_found" => "Could not start live probe: ZenlessZoneZero process was not found.",
+            "game_window_missing" => "Could not start live probe: game window is not available.",
+            "game_requires_elevated_verifier" =>
+                "Could not start live probe: ZenlessZoneZero is running as administrator. Start VerifierApp.LiveScan as administrator too.",
+            _ => "Could not start live probe: game window is not ready for live input."
+        };
     }
 
     private static string ResolveRepoRoot(string? explicitPath)
@@ -198,17 +218,17 @@ internal static class Program
     private static WorkerLaunch ResolveWorkerLaunch(string repoRoot)
     {
         var explicitPython = Environment.GetEnvironmentVariable("IKA_WORKER_PYTHON");
-        var workerPython = ResolveOptionalFile(
-            explicitPython,
-            Path.Combine(repoRoot, "worker", ".venv", "Scripts", "python.exe")
-        );
         var workerMain = ResolveOptionalFile(
             Environment.GetEnvironmentVariable("IKA_WORKER_MAIN"),
             Path.Combine(repoRoot, "worker", "main.py")
         );
-        if (!string.IsNullOrWhiteSpace(workerPython) && !string.IsNullOrWhiteSpace(workerMain))
+        if (!string.IsNullOrWhiteSpace(workerMain))
         {
-            return new WorkerLaunch(workerPython, $"\"{workerMain}\"");
+            var workerPython = ResolvePreferredWorkerPython(repoRoot, explicitPython);
+            if (!string.IsNullOrWhiteSpace(workerPython))
+            {
+                return new WorkerLaunch(workerPython, $"\"{workerMain}\"");
+            }
         }
 
         var workerExe = ResolveRequiredFile(
@@ -217,6 +237,93 @@ internal static class Program
             Path.Combine(repoRoot, "src", "VerifierApp.UI", "Bundled", "VerifierWorker.exe")
         );
         return new WorkerLaunch(workerExe, null);
+    }
+
+    private static string? ResolvePreferredWorkerPython(string repoRoot, string? explicitPython)
+    {
+        var pythonCandidates = new[]
+        {
+            explicitPython,
+            Path.Combine(repoRoot, "worker", ".venv", "Scripts", "python.exe"),
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs",
+                "Python",
+                "Python312",
+                "python.exe"
+            ),
+        };
+
+        foreach (var candidate in pythonCandidates)
+        {
+            var resolved = ResolveOptionalFile(candidate);
+            if (string.IsNullOrWhiteSpace(resolved))
+            {
+                continue;
+            }
+
+            if (SupportsCudaWorkerPython(resolved))
+            {
+                return resolved;
+            }
+        }
+
+        foreach (var candidate in pythonCandidates)
+        {
+            var resolved = ResolveOptionalFile(candidate);
+            if (!string.IsNullOrWhiteSpace(resolved))
+            {
+                return resolved;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool SupportsCudaWorkerPython(string pythonExecutablePath)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = pythonExecutablePath,
+                Arguments =
+                    "-c \"import importlib.util, onnxruntime as ort, torch; " +
+                    "ready=('CUDAExecutionProvider' in ort.get_available_providers()) and bool(torch.cuda.is_available()); " +
+                    "print('READY' if ready else 'NOT_READY')\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return false;
+            }
+
+            if (!process.WaitForExit(15000))
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // ignored
+                }
+                return false;
+            }
+
+            var stdout = process.StandardOutput.ReadToEnd().Trim();
+            return process.ExitCode == 0 &&
+                   string.Equals(stdout, "READY", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string ResolveNativeDll(string repoRoot) =>

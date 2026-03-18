@@ -2,6 +2,22 @@ using VerifierApp.Core.Models;
 
 namespace VerifierApp.Core.Services;
 
+public sealed record GameWindowStatus(
+    bool GameProcessFound,
+    bool GameWindowFound,
+    bool CurrentProcessElevated,
+    bool GameProcessElevated,
+    int? GameProcessId,
+    string? MainWindowTitle,
+    string? BlockingIssue
+)
+{
+    public bool CanInjectInput =>
+        GameProcessFound &&
+        GameWindowFound &&
+        string.IsNullOrWhiteSpace(BlockingIssue);
+}
+
 public interface IVerifierApiClient
 {
     Task<VerifierDeviceStartResponse> StartDeviceAuthAsync(VerifierDeviceStartRequest request, CancellationToken ct);
@@ -43,6 +59,7 @@ public interface IWorkerClient
 public interface INativeBridge
 {
     string CurrentInputLockMode { get; }
+    GameWindowStatus InspectGameWindowStatus();
     bool TryFocusGameWindow();
     bool TryLockInput(bool preferSoft = false);
     void UnlockInput();

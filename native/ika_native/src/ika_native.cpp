@@ -232,11 +232,40 @@ bool resolve_virtual_key(const std::string& token, WORD& key) {
     return false;
 }
 
+bool is_extended_key(WORD key) {
+    switch (key) {
+        case VK_LEFT:
+        case VK_RIGHT:
+        case VK_UP:
+        case VK_DOWN:
+        case VK_PRIOR:
+        case VK_NEXT:
+        case VK_END:
+        case VK_HOME:
+        case VK_INSERT:
+        case VK_DELETE:
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool send_key_press(WORD key) {
+    const auto scan_code = static_cast<WORD>(MapVirtualKeyW(key, MAPVK_VK_TO_VSC_EX));
+    if (scan_code == 0) {
+        return false;
+    }
+
+    DWORD base_flags = KEYEVENTF_SCANCODE;
+    if (is_extended_key(key)) {
+        base_flags |= KEYEVENTF_EXTENDEDKEY;
+    }
+
     INPUT key_down{};
     key_down.type = INPUT_KEYBOARD;
-    key_down.ki.wVk = key;
-    key_down.ki.dwFlags = 0;
+    key_down.ki.wVk = 0;
+    key_down.ki.wScan = scan_code;
+    key_down.ki.dwFlags = base_flags;
 
     if (SendInput(1U, &key_down, sizeof(INPUT)) != 1U) {
         return false;
@@ -246,8 +275,9 @@ bool send_key_press(WORD key) {
 
     INPUT key_up{};
     key_up.type = INPUT_KEYBOARD;
-    key_up.ki.wVk = key;
-    key_up.ki.dwFlags = KEYEVENTF_KEYUP;
+    key_up.ki.wVk = 0;
+    key_up.ki.wScan = scan_code;
+    key_up.ki.dwFlags = base_flags | KEYEVENTF_KEYUP;
     return SendInput(1U, &key_up, sizeof(INPUT)) == 1U;
 }
 
