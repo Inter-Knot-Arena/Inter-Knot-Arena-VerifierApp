@@ -544,22 +544,35 @@ public sealed class ScanOrchestrator
         string failureMessage = "Scan aborted: game window could not be focused."
     )
     {
-        var status = _nativeBridge.InspectGameWindowStatus();
-        if (!status.CanInjectInput)
+        var focusAttempts = ReadPositiveIntFromEnvironment("IKA_GAME_FOCUS_MAX_ATTEMPTS", 4);
+        var focusRetryDelayMs = ReadNonNegativeIntFromEnvironment("IKA_GAME_FOCUS_RETRY_DELAY_MS", 220);
+        for (var attempt = 0; attempt < focusAttempts; attempt++)
         {
-            throw new InvalidOperationException(BuildGameWindowFailureMessage(status));
+            ct.ThrowIfCancellationRequested();
+
+            var status = _nativeBridge.InspectGameWindowStatus();
+            if (!status.CanInjectInput)
+            {
+                throw new InvalidOperationException(BuildGameWindowFailureMessage(status));
+            }
+
+            if (_nativeBridge.TryFocusGameWindow())
+            {
+                var refocusDelayMs = ReadNonNegativeIntFromEnvironment("IKA_GAME_CAPTURE_REFOCUS_DELAY_MS", 90);
+                if (refocusDelayMs > 0)
+                {
+                    await Task.Delay(refocusDelayMs, ct);
+                }
+                return;
+            }
+
+            if (attempt < focusAttempts - 1 && focusRetryDelayMs > 0)
+            {
+                await Task.Delay(focusRetryDelayMs, ct);
+            }
         }
 
-        if (!_nativeBridge.TryFocusGameWindow())
-        {
-            throw new InvalidOperationException(failureMessage);
-        }
-
-        var refocusDelayMs = ReadNonNegativeIntFromEnvironment("IKA_GAME_CAPTURE_REFOCUS_DELAY_MS", 90);
-        if (refocusDelayMs > 0)
-        {
-            await Task.Delay(refocusDelayMs, ct);
-        }
+        throw new InvalidOperationException(failureMessage);
     }
 
     private static string BuildGameWindowFailureMessage(GameWindowStatus status)
