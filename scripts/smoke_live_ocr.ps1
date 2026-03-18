@@ -69,6 +69,7 @@ $previousSoftLock = [Environment]::GetEnvironmentVariable("IKA_ALLOW_SOFT_INPUT_
 $previousKeyBackend = [Environment]::GetEnvironmentVariable("IKA_KEY_SCRIPT_BACKEND", "Process")
 $previousScanScript = [Environment]::GetEnvironmentVariable("IKA_SCAN_SCRIPT", "Process")
 $previousNormalizeScript = [Environment]::GetEnvironmentVariable("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_SCRIPT", "Process")
+$previousRuntimeTempRoot = [Environment]::GetEnvironmentVariable("IKA_RUNTIME_TEMP_ROOT", "Process")
 
 try {
     if (-not [string]::IsNullOrWhiteSpace($CapturePlanPreset)) {
@@ -82,6 +83,13 @@ try {
     }
     [Environment]::SetEnvironmentVariable("IKA_ALLOW_SOFT_INPUT_LOCK", "1", "Process")
     [Environment]::SetEnvironmentVariable("IKA_KEY_SCRIPT_BACKEND", "native", "Process")
+    if ([string]::IsNullOrWhiteSpace($previousRuntimeTempRoot)) {
+        [Environment]::SetEnvironmentVariable(
+            "IKA_RUNTIME_TEMP_ROOT",
+            (Join-Path $repoRoot "artifacts\runtime_temp"),
+            "Process"
+        )
+    }
 
     Push-Location $repoRoot
     try {
@@ -100,4 +108,5 @@ finally {
     [Environment]::SetEnvironmentVariable("IKA_KEY_SCRIPT_BACKEND", $previousKeyBackend, "Process")
     [Environment]::SetEnvironmentVariable("IKA_SCAN_SCRIPT", $previousScanScript, "Process")
     [Environment]::SetEnvironmentVariable("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_SCRIPT", $previousNormalizeScript, "Process")
+    [Environment]::SetEnvironmentVariable("IKA_RUNTIME_TEMP_ROOT", $previousRuntimeTempRoot, "Process")
 }

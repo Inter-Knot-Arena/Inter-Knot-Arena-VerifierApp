@@ -48,7 +48,8 @@ public sealed class ScanOrchestrator
                 scanScript = DefaultLiveEntryScript;
             }
             var preferSoftInputLock = ScriptUsesPointerInput(scanScript) ||
-                                      RuntimeScreenCapturePlan.LoadActivePlan().Any(step => ScriptUsesPointerInput(step.Script));
+                                      RuntimeScreenCapturePlan.LoadActivePlan(RuntimeScreenCaptureMode.VisibleSlice)
+                                          .Any(step => ScriptUsesPointerInput(step.Script));
             var scanStepDelayMs = ReadPositiveIntFromEnvironment(
                 "IKA_SCAN_SCRIPT_STEP_DELAY_MS",
                 string.Equals(scanScript, DefaultLiveEntryScript, StringComparison.OrdinalIgnoreCase) ? 500 : 120
@@ -149,16 +150,28 @@ public sealed class ScanOrchestrator
             );
         }
 
-        var runtimeCaptures = await CaptureExtraScreensAsync(sessionId, ct, pageIndex: 1);
-        return await RunWorkerScanAsync(
+        var runtimeCaptures = await CaptureExtraScreensAsync(
             sessionId,
-            regionHint,
-            fullSync: false,
-            locale,
-            resolution,
-            runtimeCaptures,
-            ct
+            ct,
+            pageIndex: 1,
+            mode: RuntimeScreenCaptureMode.VisibleSlice
         );
+        try
+        {
+            return await RunWorkerScanAsync(
+                sessionId,
+                regionHint,
+                fullSync: false,
+                locale,
+                resolution,
+                runtimeCaptures,
+                ct
+            );
+        }
+        finally
+        {
+            CleanupRuntimeCaptureArtifacts(runtimeCaptures);
+        }
     }
 
     private async Task<RosterScanResult> ExecuteFullRosterScanAsync(
@@ -231,16 +244,29 @@ public sealed class ScanOrchestrator
             }
 
             var pageSessionId = $"{sessionId}-page-{pageIndex + 1:D2}";
-            var runtimeCaptures = await CaptureExtraScreensAsync(pageSessionId, ct, pageIndex: pageIndex + 1);
-            var pageScan = await RunWorkerScanAsync(
+            var runtimeCaptures = await CaptureExtraScreensAsync(
                 pageSessionId,
-                regionHint,
-                fullSync: false,
-                locale,
-                resolution,
-                runtimeCaptures,
-                ct
+                ct,
+                pageIndex: pageIndex + 1,
+                mode: RuntimeScreenCaptureMode.FullRosterPage
             );
+            RosterScanResult pageScan;
+            try
+            {
+                pageScan = await RunWorkerScanAsync(
+                    pageSessionId,
+                    regionHint,
+                    fullSync: false,
+                    locale,
+                    resolution,
+                    runtimeCaptures,
+                    ct
+                );
+            }
+            finally
+            {
+                CleanupRuntimeCaptureArtifacts(runtimeCaptures);
+            }
             if (!string.IsNullOrWhiteSpace(pageScan.ErrorCode))
             {
                 throw new InvalidOperationException(
@@ -428,17 +454,17 @@ public sealed class ScanOrchestrator
     private async Task<IReadOnlyList<ScreenCaptureInput>> CaptureExtraScreensAsync(
         string sessionId,
         CancellationToken ct,
-        int? pageIndex = null
+        int? pageIndex = null,
+        RuntimeScreenCaptureMode mode = RuntimeScreenCaptureMode.VisibleSlice
     )
     {
-        var plan = RuntimeScreenCapturePlan.LoadActivePlan();
+        var plan = RuntimeScreenCapturePlan.LoadActivePlan(mode);
         if (plan.Count == 0)
         {
             return [];
         }
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), "ika_verifier", "screen_captures", sessionId);
-        Directory.CreateDirectory(tempRoot);
+        var tempRoot = ResolveRuntimeTempRoot("screen_captures", sessionId);
 
         var captures = new List<ScreenCaptureInput>();
         for (var index = 0; index < plan.Count; index++)
@@ -466,11 +492,12 @@ public sealed class ScanOrchestrator
             var capturePageIndex = step.PageIndex ?? pageIndex;
             var fileName = BuildCaptureFileName(index + 1, step, capturePageIndex);
             var outputPath = Path.Combine(tempRoot, fileName);
-            await EnsureGameFocusedAsync(
-                ct,
-                $"Scan aborted: game window focus was lost before capturing step {index + 1}."
-            );
-            if (!_nativeBridge.CaptureGameWindowPng(outputPath))
+            var windowStatus = _nativeBridge.InspectGameWindowStatus();
+            if (!windowStatus.CanInjectInput)
+            {
+                throw new InvalidOperationException(BuildGameWindowFailureMessage(windowStatus));
+            }
+            if (!TryCaptureRuntimePng(outputPath))
             {
                 throw new InvalidOperationException(
                     $"Scan aborted: game-window capture failed for step {index + 1} ({step.Role})."
@@ -551,7 +578,16 @@ public sealed class ScanOrchestrator
             ct.ThrowIfCancellationRequested();
             await EnsureGameFocusedAsync(ct);
             var stateProbePath = await CaptureVisibleSliceStateProbeAsync(attempt + 1, ct);
-            if (LiveUiDetector.LooksLikeHomeScreen(stateProbePath) &&
+            var looksLikeHomeScreen = false;
+            try
+            {
+                looksLikeHomeScreen = LiveUiDetector.LooksLikeHomeScreen(stateProbePath);
+            }
+            finally
+            {
+                DeleteFileQuietly(stateProbePath);
+            }
+            if (looksLikeHomeScreen &&
                 await TryExecuteGameScriptAsync(entryScript, entryStepDelayMs, entryPostDelayMs, expectFrameChange: true, ct))
             {
                 if (entryStabilizeDelayMs > 0)
@@ -591,15 +627,14 @@ public sealed class ScanOrchestrator
 
     private async Task<string> CaptureVisibleSliceStateProbeAsync(int attempt, CancellationToken ct)
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), "ika_verifier", "entry_state");
-        Directory.CreateDirectory(tempRoot);
+        var tempRoot = ResolveRuntimeTempRoot("entry_state");
         var captureAttempts = ReadPositiveIntFromEnvironment("IKA_GAME_CAPTURE_FILE_MAX_ATTEMPTS", 3);
         var readyDelayMs = ReadNonNegativeIntFromEnvironment("IKA_GAME_CAPTURE_FILE_READY_DELAY_MS", 60);
 
         for (var captureAttempt = 1; captureAttempt <= captureAttempts; captureAttempt++)
         {
             var path = Path.Combine(tempRoot, $"visible_slice_entry_{attempt:D2}_{Guid.NewGuid():N}.png");
-            if (!_nativeBridge.CaptureGameWindowPng(path))
+            if (!TryCaptureRuntimePng(path))
             {
                 continue;
             }
@@ -760,7 +795,10 @@ public sealed class ScanOrchestrator
 
         return script.Contains("CLICK:", StringComparison.OrdinalIgnoreCase) ||
                script.Contains("DOUBLECLICK:", StringComparison.OrdinalIgnoreCase) ||
-               script.Contains("DBLCLICK:", StringComparison.OrdinalIgnoreCase);
+               script.Contains("DBLCLICK:", StringComparison.OrdinalIgnoreCase) ||
+               script.Contains("WHEEL:", StringComparison.OrdinalIgnoreCase) ||
+               script.Contains("WHEELUP", StringComparison.OrdinalIgnoreCase) ||
+               script.Contains("WHEELDOWN", StringComparison.OrdinalIgnoreCase);
     }
 
     private RosterScanResult AttachInputLockMetadata(RosterScanResult scan)
@@ -1209,6 +1247,195 @@ public sealed class ScanOrchestrator
             return 0.0;
         }
         return values.TryGetValue(key, out var value) ? value : 0.0;
+    }
+
+    private static string ResolveRuntimeTempRoot(params string[] segments)
+    {
+        var baseRoot = ResolveRuntimeTempBaseRoot();
+        var path = segments.Aggregate(baseRoot, Path.Combine);
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static string ResolveRuntimeTempBaseRoot()
+    {
+        var overrideRoot = Environment.GetEnvironmentVariable("IKA_RUNTIME_TEMP_ROOT");
+        if (!string.IsNullOrWhiteSpace(overrideRoot))
+        {
+            var expandedRoot = Environment.ExpandEnvironmentVariables(overrideRoot.Trim());
+            Directory.CreateDirectory(expandedRoot);
+            return expandedRoot;
+        }
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), "ika_verifier");
+        if (HasSufficientFreeSpace(tempRoot, minFreeBytes: 256L * 1024L * 1024L))
+        {
+            Directory.CreateDirectory(tempRoot);
+            return tempRoot;
+        }
+
+        foreach (var candidate in EnumerateFallbackRuntimeTempRoots())
+        {
+            if (PathsShareDrive(tempRoot, candidate))
+            {
+                continue;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(candidate);
+                return candidate;
+            }
+            catch
+            {
+                // try the next candidate
+            }
+        }
+
+        Directory.CreateDirectory(tempRoot);
+        return tempRoot;
+    }
+
+    private static IEnumerable<string> EnumerateFallbackRuntimeTempRoots()
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.CurrentDirectory))
+        {
+            yield return Path.Combine(Environment.CurrentDirectory, "artifacts", "runtime_temp", "ika_verifier");
+        }
+
+        if (!string.IsNullOrWhiteSpace(AppContext.BaseDirectory))
+        {
+            yield return Path.Combine(AppContext.BaseDirectory, "artifacts", "runtime_temp", "ika_verifier");
+        }
+    }
+
+    private static bool HasSufficientFreeSpace(string path, long minFreeBytes)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(path));
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                return true;
+            }
+
+            return new DriveInfo(root).AvailableFreeSpace >= minFreeBytes;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static bool PathsShareDrive(string left, string right)
+    {
+        try
+        {
+            var leftRoot = Path.GetPathRoot(Path.GetFullPath(left));
+            var rightRoot = Path.GetPathRoot(Path.GetFullPath(right));
+            return string.Equals(leftRoot, rightRoot, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void CleanupRuntimeCaptureArtifacts(IReadOnlyList<ScreenCaptureInput> captures)
+    {
+        if (captures.Count == 0)
+        {
+            return;
+        }
+
+        var parentDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var capture in captures)
+        {
+            if (string.IsNullOrWhiteSpace(capture.Path))
+            {
+                continue;
+            }
+
+            DeleteFileQuietly(capture.Path);
+
+            var parent = Path.GetDirectoryName(capture.Path);
+            if (!string.IsNullOrWhiteSpace(parent))
+            {
+                parentDirectories.Add(parent);
+            }
+        }
+
+        foreach (var parent in parentDirectories.OrderByDescending(value => value.Length))
+        {
+            DeleteDirectoryQuietly(parent);
+        }
+    }
+
+    private bool TryCaptureRuntimePng(string outputPath)
+    {
+        if (_nativeBridge.CaptureGameWindowPng(outputPath))
+        {
+            return true;
+        }
+
+        var allowDesktopFallback = ReadBooleanFlagFromEnvironment("IKA_ALLOW_DESKTOP_CAPTURE_FALLBACK", true);
+        return allowDesktopFallback && _nativeBridge.CaptureDesktopPng(outputPath);
+    }
+
+    private static bool ReadBooleanFlagFromEnvironment(string envVar, bool fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(envVar);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return fallback;
+        }
+
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+            _ => fallback,
+        };
+    }
+
+    private static void DeleteFileQuietly(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // ignored
+        }
+    }
+
+    private static void DeleteDirectoryQuietly(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+            // ignored
+        }
     }
 
     private static double Round4(double value) => Math.Round(value, 4);

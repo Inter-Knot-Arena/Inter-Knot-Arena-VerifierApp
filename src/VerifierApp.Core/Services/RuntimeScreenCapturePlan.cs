@@ -17,6 +17,12 @@ internal sealed record RuntimeScreenCaptureStep(
     bool RequiresVisibleSliceEntry = false
 );
 
+internal enum RuntimeScreenCaptureMode
+{
+    VisibleSlice,
+    FullRosterPage,
+}
+
 internal static class RuntimeScreenCapturePlan
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -47,18 +53,20 @@ internal static class RuntimeScreenCapturePlan
 
     public static string DefaultVisibleSliceEntryScript => Click(HomeAgentsIconX, HomeAgentsIconY);
 
-    public static IReadOnlyList<RuntimeScreenCaptureStep> LoadActivePlan()
+    public static IReadOnlyList<RuntimeScreenCaptureStep> LoadActivePlan(
+        RuntimeScreenCaptureMode mode = RuntimeScreenCaptureMode.VisibleSlice
+    )
     {
-        var envPlan = LoadFromEnvironment();
+        var envPlan = LoadFromEnvironment(mode);
         if (envPlan.Count > 0)
         {
             return envPlan;
         }
 
-        return LoadDefaultPreset();
+        return LoadDefaultPreset(mode);
     }
 
-    private static IReadOnlyList<RuntimeScreenCaptureStep> LoadFromEnvironment()
+    private static IReadOnlyList<RuntimeScreenCaptureStep> LoadFromEnvironment(RuntimeScreenCaptureMode mode)
     {
         var inlineJson = Environment.GetEnvironmentVariable("IKA_EXTRA_SCREEN_CAPTURE_PLAN_JSON");
         var planPath = Environment.GetEnvironmentVariable("IKA_EXTRA_SCREEN_CAPTURE_PLAN_PATH");
@@ -80,7 +88,7 @@ internal static class RuntimeScreenCapturePlan
 
             return steps
                 .Where(IsValid)
-                .Select(Normalize)
+                .Select(step => Normalize(step, mode))
                 .ToArray();
         }
         catch
@@ -89,7 +97,7 @@ internal static class RuntimeScreenCapturePlan
         }
     }
 
-    private static IReadOnlyList<RuntimeScreenCaptureStep> LoadDefaultPreset()
+    private static IReadOnlyList<RuntimeScreenCaptureStep> LoadDefaultPreset(RuntimeScreenCaptureMode mode)
     {
         var preset = Environment.GetEnvironmentVariable("IKA_DEFAULT_OCR_CAPTURE_PLAN");
         if (string.IsNullOrWhiteSpace(preset))
@@ -106,11 +114,11 @@ internal static class RuntimeScreenCapturePlan
 
         if (preset.Equals(DefaultPreset, StringComparison.OrdinalIgnoreCase))
         {
-            return CreateVisibleSliceAgentDetailPlan();
+            return CreateVisibleSliceAgentDetailPlan(mode);
         }
         if (preset.Equals(RichEquipmentPreset, StringComparison.OrdinalIgnoreCase))
         {
-            return CreateVisibleSliceRichEquipmentPlan();
+            return CreateVisibleSliceRichEquipmentPlan(mode);
         }
 
         return [];
@@ -158,7 +166,7 @@ internal static class RuntimeScreenCapturePlan
         return true;
     }
 
-    private static RuntimeScreenCaptureStep Normalize(RuntimeScreenCaptureStep step)
+    private static RuntimeScreenCaptureStep Normalize(RuntimeScreenCaptureStep step, RuntimeScreenCaptureMode mode)
     {
         var role = step.Role.Trim();
         var alias = string.IsNullOrWhiteSpace(step.ScreenAlias)
@@ -173,20 +181,26 @@ internal static class RuntimeScreenCapturePlan
             ScreenAlias = alias,
             PageIndex = pageIndex,
             StepDelayMs = stepDelayMs,
-            PostDelayMs = postDelayMs
+            PostDelayMs = postDelayMs,
+            RequiresVisibleSliceEntry = mode == RuntimeScreenCaptureMode.VisibleSlice && step.RequiresVisibleSliceEntry
         };
     }
 
-    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceAgentDetailPlan() =>
-        CreateGameplayAgentGridPlan(includeEquipment: false);
+    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceAgentDetailPlan(RuntimeScreenCaptureMode mode) =>
+        CreateGameplayAgentGridPlan(includeEquipment: false, mode);
 
-    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceRichEquipmentPlan() =>
-        CreateGameplayAgentGridPlan(includeEquipment: true);
+    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceRichEquipmentPlan(RuntimeScreenCaptureMode mode) =>
+        CreateGameplayAgentGridPlan(includeEquipment: true, mode);
 
-    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateGameplayAgentGridPlan(bool includeEquipment)
+    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateGameplayAgentGridPlan(
+        bool includeEquipment,
+        RuntimeScreenCaptureMode mode
+    )
     {
+        var requiresVisibleSliceEntry = mode == RuntimeScreenCaptureMode.VisibleSlice;
+        var exitAgentGridWhenDone = mode == RuntimeScreenCaptureMode.VisibleSlice;
         var steps = new List<RuntimeScreenCaptureStep>();
-        steps.Add(CreateAgentDetailCapture(agentSlotIndex: 1, requiresVisibleSliceEntry: true));
+        steps.Add(CreateAgentDetailCapture(agentSlotIndex: 1, requiresVisibleSliceEntry));
         if (includeEquipment)
         {
             AddEquipmentFlow(steps, agentSlotIndex: 1);
@@ -210,7 +224,7 @@ internal static class RuntimeScreenCapturePlan
                     PostDelayMs: 900,
                     Capture: false,
                     ExpectFrameChange: true,
-                    RequiresVisibleSliceEntry: true
+                    RequiresVisibleSliceEntry: requiresVisibleSliceEntry
                 )
             );
             steps.Add(CreateAgentDetailCapture(agentSlotIndex));
@@ -224,18 +238,21 @@ internal static class RuntimeScreenCapturePlan
             }
         }
 
-        steps.Add(
-            new RuntimeScreenCaptureStep(
-                Role: string.Empty,
-                Script: "ESC",
-                AgentSlotIndex: AdditionalVisibleAgentGridPoints.Length + 1,
-                ScreenAlias: "exit_agent_grid",
-                StepDelayMs: 120,
-                PostDelayMs: 240,
-                Capture: false,
-                ExpectFrameChange: true
-            )
-        );
+        if (exitAgentGridWhenDone)
+        {
+            steps.Add(
+                new RuntimeScreenCaptureStep(
+                    Role: string.Empty,
+                    Script: "ESC",
+                    AgentSlotIndex: AdditionalVisibleAgentGridPoints.Length + 1,
+                    ScreenAlias: "exit_agent_grid",
+                    StepDelayMs: 120,
+                    PostDelayMs: 240,
+                    Capture: false,
+                    ExpectFrameChange: true
+                )
+            );
+        }
 
         return steps;
     }

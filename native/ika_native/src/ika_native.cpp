@@ -395,6 +395,32 @@ bool parse_click_command(const std::string& token, LONG& x, LONG& y, int& click_
     return resolve_click_point(x_value, y_value, x, y);
 }
 
+bool parse_wheel_command(const std::string& token, int& wheel_delta) {
+    if (token == "WHEELUP") {
+        wheel_delta = WHEEL_DELTA;
+        return true;
+    }
+    if (token == "WHEELDOWN") {
+        wheel_delta = -WHEEL_DELTA;
+        return true;
+    }
+    if (token.rfind("WHEEL:", 0) != 0) {
+        return false;
+    }
+
+    const auto payload = trim_copy(token.substr(std::strlen("WHEEL:")));
+    if (payload.empty()) {
+        return false;
+    }
+
+    try {
+        wheel_delta = std::stoi(payload);
+        return wheel_delta != 0;
+    } catch (...) {
+        return false;
+    }
+}
+
 bool send_left_click(LONG x, LONG y, int click_count) {
     if (click_count <= 0) {
         return false;
@@ -450,6 +476,14 @@ bool send_left_click(LONG x, LONG y, int click_count) {
     }
 
     return true;
+}
+
+bool send_mouse_wheel(int wheel_delta) {
+    INPUT wheel_input{};
+    wheel_input.type = INPUT_MOUSE;
+    wheel_input.mi.mouseData = static_cast<DWORD>(wheel_delta);
+    wheel_input.mi.dwFlags = MOUSEEVENTF_WHEEL;
+    return SendInput(1U, &wheel_input, sizeof(INPUT)) == 1U;
 }
 
 }  // namespace
@@ -515,18 +549,25 @@ int ika_native_execute_scan_script(const char* script, int step_delay_ms) {
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
                 } else {
-                    WORD key = 0;
-                    if (!resolve_virtual_key(token, key)) {
-                        return 0;
+                    int wheel_delta = 0;
+                    if (parse_wheel_command(token, wheel_delta)) {
+                        if (!send_mouse_wheel(wheel_delta)) {
+                            return 0;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+                    } else {
+                        WORD key = 0;
+                        if (!resolve_virtual_key(token, key)) {
+                            return 0;
+                        }
+                        if (!send_key_press(key)) {
+                            return 0;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
                     }
-                    if (!send_key_press(key)) {
-                        return 0;
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
                 }
             }
         }
-
         if (next == std::string::npos) {
             break;
         }
