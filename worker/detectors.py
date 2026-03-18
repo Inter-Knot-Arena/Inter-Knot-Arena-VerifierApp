@@ -216,7 +216,11 @@ def _prepare_roster_capture_assets(session_id: str, resolution: str) -> Dict[str
     if frame is None:
         return {}
 
-    temp_root = Path(tempfile.gettempdir()) / "ika_verifier" / "roster" / session_id
+    runtime_temp_root = str(os.environ.get("IKA_RUNTIME_TEMP_ROOT") or "").strip()
+    if runtime_temp_root:
+        temp_root = Path(runtime_temp_root) / "ika_verifier" / "roster" / session_id
+    else:
+        temp_root = Path(tempfile.gettempdir()) / "ika_verifier" / "roster" / session_id
     temp_root.mkdir(parents=True, exist_ok=True)
 
     payload: Dict[str, Any] = {}
