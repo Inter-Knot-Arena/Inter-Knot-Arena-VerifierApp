@@ -33,6 +33,9 @@ public sealed class NamedPipeWorkerClient : IWorkerClient, IAsyncDisposable
     public Task<RosterScanResult> RunRosterScanAsync(RosterScanCommand command, CancellationToken ct) =>
         SendAsync<RosterScanResult>("ocr.scan", command, ct);
 
+    public Task<EquipmentOverviewInspectionResult> InspectEquipmentOverviewAsync(string imagePath, CancellationToken ct) =>
+        SendAsync<EquipmentOverviewInspectionResult>("ocr.inspectEquipmentOverview", new { path = imagePath }, ct);
+
     public Task<DetectionResult> RunPrecheckAsync(
         string matchId,
         string? frameHashHint,

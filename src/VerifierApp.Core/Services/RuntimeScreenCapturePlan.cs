@@ -28,10 +28,11 @@ internal static class RuntimeScreenCapturePlan
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string DefaultPreset = "VISIBLE_SLICE_AGENT_DETAIL_V1";
     private const string RichEquipmentPreset = "VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA";
-    private static readonly (double X, double Y)[] AdditionalVisibleAgentGridPoints =
+    private static readonly (int AgentSlotIndex, double X, double Y)[] VisibleAgentGridPoints =
     [
-        (0.688, 0.197),
-        (0.814, 0.124),
+        (1, 0.597, 0.135),
+        (2, 0.688, 0.197),
+        (3, 0.814, 0.124),
     ];
     private static readonly (int SlotIndex, double X, double Y)[] DiskSlotPoints =
     [
@@ -200,33 +201,11 @@ internal static class RuntimeScreenCapturePlan
         var requiresVisibleSliceEntry = mode == RuntimeScreenCaptureMode.VisibleSlice;
         var exitAgentGridWhenDone = mode == RuntimeScreenCaptureMode.VisibleSlice;
         var steps = new List<RuntimeScreenCaptureStep>();
-        steps.Add(CreateAgentDetailCapture(agentSlotIndex: 1, requiresVisibleSliceEntry));
-        if (includeEquipment)
+        for (var index = 0; index < VisibleAgentGridPoints.Length; index++)
         {
-            AddEquipmentFlow(steps, agentSlotIndex: 1);
-        }
-        else
-        {
-            AddReturnToAgentGridStep(steps, agentSlotIndex: 1);
-        }
-
-        for (var index = 0; index < AdditionalVisibleAgentGridPoints.Length; index++)
-        {
-            var agentSlotIndex = index + 2;
-            var point = AdditionalVisibleAgentGridPoints[index];
-            steps.Add(
-                new RuntimeScreenCaptureStep(
-                    Role: string.Empty,
-                    Script: Click(point.X, point.Y),
-                    AgentSlotIndex: agentSlotIndex,
-                    ScreenAlias: $"select_agent_{agentSlotIndex}",
-                    StepDelayMs: 120,
-                    PostDelayMs: 900,
-                    Capture: false,
-                    ExpectFrameChange: true,
-                    RequiresVisibleSliceEntry: requiresVisibleSliceEntry
-                )
-            );
+            var point = VisibleAgentGridPoints[index];
+            var agentSlotIndex = point.AgentSlotIndex;
+            steps.Add(CreateAgentSelectStep(agentSlotIndex, point.X, point.Y, requiresVisibleSliceEntry));
             steps.Add(CreateAgentDetailCapture(agentSlotIndex));
             if (includeEquipment)
             {
@@ -244,7 +223,7 @@ internal static class RuntimeScreenCapturePlan
                 new RuntimeScreenCaptureStep(
                     Role: string.Empty,
                     Script: "ESC",
-                    AgentSlotIndex: AdditionalVisibleAgentGridPoints.Length + 1,
+                    AgentSlotIndex: VisibleAgentGridPoints.Length,
                     ScreenAlias: "exit_agent_grid",
                     StepDelayMs: 120,
                     PostDelayMs: 240,
@@ -256,6 +235,24 @@ internal static class RuntimeScreenCapturePlan
 
         return steps;
     }
+
+    private static RuntimeScreenCaptureStep CreateAgentSelectStep(
+        int agentSlotIndex,
+        double x,
+        double y,
+        bool requiresVisibleSliceEntry = false
+    ) =>
+        new(
+            Role: string.Empty,
+            Script: Click(x, y),
+            AgentSlotIndex: agentSlotIndex,
+            ScreenAlias: $"select_agent_{agentSlotIndex}",
+            StepDelayMs: 120,
+            PostDelayMs: 900,
+            Capture: false,
+            ExpectFrameChange: true,
+            RequiresVisibleSliceEntry: requiresVisibleSliceEntry
+        );
 
     private static RuntimeScreenCaptureStep CreateAgentDetailCapture(int agentSlotIndex, bool requiresVisibleSliceEntry = false) =>
         new(
@@ -328,6 +325,7 @@ internal static class RuntimeScreenCapturePlan
                     Role: string.Empty,
                     Script: "ESC",
                     AgentSlotIndex: agentSlotIndex,
+                    SlotIndex: slotIndex,
                     ScreenAlias: $"exit_agent_{agentSlotIndex}_disk_{slotIndex}",
                     StepDelayMs: 120,
                     PostDelayMs: 700,

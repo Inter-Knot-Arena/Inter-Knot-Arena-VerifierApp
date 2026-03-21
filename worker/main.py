@@ -8,7 +8,7 @@ from typing import Any, Dict, Tuple
 import win32file
 import win32pipe
 
-from detectors import run_inrun, run_ocr_scan, run_precheck
+from detectors import inspect_equipment_overview, run_inrun, run_ocr_scan, run_precheck
 
 
 def read_line(pipe: int) -> str | None:
@@ -36,6 +36,8 @@ def dispatch(method: str, payload: Dict[str, Any]) -> Any:
         return True
     if method == "ocr.scan":
         return run_ocr_scan(payload)
+    if method == "ocr.inspectEquipmentOverview":
+        return inspect_equipment_overview(payload)
     if method == "cv.precheck":
         return run_precheck(payload)
     if method == "cv.inrun":

@@ -21,6 +21,13 @@ public sealed record RosterScanCommand(
     IReadOnlyList<ScreenCaptureInput>? ScreenCaptures = null
 );
 
+public sealed record EquipmentOverviewInspectionResult(
+    bool? WeaponPresent,
+    IReadOnlyDictionary<string, bool>? DiscSlotOccupancy,
+    double? Confidence,
+    IReadOnlyList<string>? LowConfReasons
+);
+
 public sealed record AgentScanResult(
     string AgentId,
     double? Level,

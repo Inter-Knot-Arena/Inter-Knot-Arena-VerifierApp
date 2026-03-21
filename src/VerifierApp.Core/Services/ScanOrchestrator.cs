@@ -487,6 +487,9 @@ public sealed class ScanOrchestrator
         var tempRoot = ResolveRuntimeTempRoot("screen_captures", sessionId);
 
         var captures = new List<ScreenCaptureInput>();
+        EquipmentOverviewInspectionResult? currentEquipmentOverview = null;
+        var skipNextAmplifierExit = false;
+        int? skipNextDiskExitSlot = null;
         for (var index = 0; index < plan.Count; index++)
         {
             ct.ThrowIfCancellationRequested();
@@ -494,6 +497,26 @@ public sealed class ScanOrchestrator
             if (step.RequiresVisibleSliceEntry)
             {
                 await EnsureVisibleSliceRosterEntryAsync(ct);
+            }
+            if (ShouldSkipAmplifierDetailStep(step, currentEquipmentOverview))
+            {
+                skipNextAmplifierExit = true;
+                continue;
+            }
+            if (ShouldSkipAmplifierExitStep(step, skipNextAmplifierExit))
+            {
+                skipNextAmplifierExit = false;
+                continue;
+            }
+            if (ShouldSkipDiskDetailStep(step, currentEquipmentOverview))
+            {
+                skipNextDiskExitSlot = step.SlotIndex;
+                continue;
+            }
+            if (ShouldSkipDiskExitStep(step, skipNextDiskExitSlot))
+            {
+                skipNextDiskExitSlot = null;
+                continue;
             }
             await ExecuteGameScriptAsync(
                 step.Script ?? string.Empty,
@@ -534,9 +557,69 @@ public sealed class ScanOrchestrator
                     PageIndex: capturePageIndex
                 )
             );
+
+            if (string.Equals(step.Role, "equipment", StringComparison.OrdinalIgnoreCase))
+            {
+                currentEquipmentOverview = await TryInspectEquipmentOverviewAsync(outputPath, ct);
+            }
         }
 
         return captures;
+    }
+
+    private async Task<EquipmentOverviewInspectionResult?> TryInspectEquipmentOverviewAsync(
+        string imagePath,
+        CancellationToken ct
+    )
+    {
+        try
+        {
+            return await _worker.InspectEquipmentOverviewAsync(imagePath, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool ShouldSkipAmplifierDetailStep(
+        RuntimeScreenCaptureStep step,
+        EquipmentOverviewInspectionResult? equipmentOverview
+    )
+    {
+        return string.Equals(step.Role, "amplifier_detail", StringComparison.OrdinalIgnoreCase) &&
+               equipmentOverview is not null &&
+               equipmentOverview.WeaponPresent is false;
+    }
+
+    private static bool ShouldSkipAmplifierExitStep(RuntimeScreenCaptureStep step, bool skipNextAmplifierExit)
+    {
+        return skipNextAmplifierExit &&
+               string.IsNullOrWhiteSpace(step.Role) &&
+               (step.ScreenAlias?.Contains("_amplifier", StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static bool ShouldSkipDiskDetailStep(
+        RuntimeScreenCaptureStep step,
+        EquipmentOverviewInspectionResult? equipmentOverview
+    )
+    {
+        if (!string.Equals(step.Role, "disk_detail", StringComparison.OrdinalIgnoreCase) ||
+            equipmentOverview?.DiscSlotOccupancy is null ||
+            step.SlotIndex is not int slotIndex)
+        {
+            return false;
+        }
+
+        return equipmentOverview.DiscSlotOccupancy.TryGetValue(slotIndex.ToString(), out var present) && !present;
+    }
+
+    private static bool ShouldSkipDiskExitStep(RuntimeScreenCaptureStep step, int? skipNextDiskExitSlot)
+    {
+        return skipNextDiskExitSlot is int slotIndex &&
+               string.IsNullOrWhiteSpace(step.Role) &&
+               step.SlotIndex == slotIndex &&
+               (step.ScreenAlias?.Contains("_disk_", StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
     private async Task EnsureGameFocusedAsync(

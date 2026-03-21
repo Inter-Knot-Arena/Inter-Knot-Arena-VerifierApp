@@ -91,6 +91,11 @@ def _load_ocr_runtime():
     return scan_fn, failure_cls
 
 
+def _load_ocr_equipment_inspector():
+    module = importlib.import_module("scanner")
+    return getattr(module, "inspect_equipment_capture")
+
+
 def _load_cv_runtime():
     module = importlib.import_module("runtime.matcher")
     evaluate_fn = getattr(module, "evaluate_detection")
@@ -358,6 +363,18 @@ def run_ocr_scan(payload: Dict[str, Any]) -> Dict[str, Any]:
             "errorCode": str(exc.code),
             "errorMessage": exc.message,
         }
+
+
+def inspect_equipment_overview(payload: Dict[str, Any]) -> Dict[str, Any]:
+    path = str(payload.get("path", "")).strip()
+    if not path:
+        raise ValueError("Equipment overview path is required.")
+
+    inspect_equipment = _load_ocr_equipment_inspector()
+    result = inspect_equipment(path)
+    if not isinstance(result, dict):
+        raise ValueError("Equipment overview inspector returned invalid payload.")
+    return result
 
 
 def _resolve_detection_sets(payload: Dict[str, Any]) -> tuple[list[str], list[str], list[str], list[str]]:

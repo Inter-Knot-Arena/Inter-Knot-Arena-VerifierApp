@@ -33,6 +33,7 @@ public interface IVerifierApiClient
 public interface IWorkerClient
 {
     Task<RosterScanResult> RunRosterScanAsync(RosterScanCommand command, CancellationToken ct);
+    Task<EquipmentOverviewInspectionResult> InspectEquipmentOverviewAsync(string imagePath, CancellationToken ct);
     Task<DetectionResult> RunPrecheckAsync(
         string matchId,
         string? frameHashHint,
