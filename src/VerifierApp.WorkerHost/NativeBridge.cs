@@ -67,6 +67,12 @@ public sealed class NativeBridge : INativeBridge
 
     public bool TryFocusGameWindow()
     {
+        var timeoutMs = ReadPositiveIntFromEnvironment("IKA_GAME_FOCUS_CALL_TIMEOUT_MS", 1_500);
+        return RunBounded(TryFocusGameWindowCore, timeoutMs, false);
+    }
+
+    private bool TryFocusGameWindowCore()
+    {
         try
         {
             var status = InspectGameWindowStatus();
@@ -139,6 +145,12 @@ public sealed class NativeBridge : INativeBridge
         }
 
         var normalizedDelay = stepDelayMs <= 0 ? 120 : stepDelayMs;
+        var timeoutMs = ComputeNativeScriptTimeoutMs(script, normalizedDelay);
+        return RunBounded(() => ExecuteScanScriptCore(script, normalizedDelay), timeoutMs, false);
+    }
+
+    private bool ExecuteScanScriptCore(string script, int normalizedDelay)
+    {
         if (!InspectGameWindowStatus().CanInjectInput)
         {
             return false;
@@ -173,13 +185,19 @@ public sealed class NativeBridge : INativeBridge
             // Fall through to native desktop hash fallback.
         }
 
-        var buffer = new byte[65];
-        var result = IkaNativeCaptureFrameHash(buffer, buffer.Length);
-        if (result <= 0)
-        {
-            return string.Empty;
-        }
-        return System.Text.Encoding.ASCII.GetString(buffer).TrimEnd('\0');
+        var timeoutMs = ReadPositiveIntFromEnvironment("IKA_GAME_FRAME_HASH_TIMEOUT_MS", 900);
+        return RunBounded(
+            () =>
+            {
+                var buffer = new byte[65];
+                var result = IkaNativeCaptureFrameHash(buffer, buffer.Length);
+                return result <= 0
+                    ? string.Empty
+                    : System.Text.Encoding.ASCII.GetString(buffer).TrimEnd('\0');
+            },
+            timeoutMs,
+            string.Empty
+        );
     }
 
     public bool CaptureGameWindowPng(string outputPath)
@@ -563,6 +581,26 @@ public sealed class NativeBridge : INativeBridge
     {
         var timeoutMs = ReadPositiveIntFromEnvironment("IKA_GAME_CAPTURE_TIMEOUT_MS", 1800);
         return RunBounded(() => CaptureWindowPng(windowHandle, outputPath), timeoutMs, false);
+    }
+
+    private static int ComputeNativeScriptTimeoutMs(string script, int stepDelayMs)
+    {
+        var minimumTimeoutMs = ReadPositiveIntFromEnvironment("IKA_NATIVE_SCRIPT_TIMEOUT_MS", 6_000);
+        var tokenCount = CountScriptTokens(script);
+        var estimatedDurationMs = (tokenCount * Math.Max(stepDelayMs, 120)) + 1_800;
+        return Math.Max(minimumTimeoutMs, estimatedDurationMs);
+    }
+
+    private static int CountScriptTokens(string script)
+    {
+        if (string.IsNullOrWhiteSpace(script))
+        {
+            return 0;
+        }
+
+        return script
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Length;
     }
 
     private static bool TryCaptureWindowHashWithTimeout(IntPtr windowHandle, out string hash)

@@ -8,6 +8,7 @@ public sealed class ScanOrchestrator
     private readonly IWorkerClient _worker;
     private readonly INativeBridge _nativeBridge;
     private const string DefaultLiveEntryScript = "ESC,ESC";
+    private static readonly object TraceLock = new();
 
     public ScanOrchestrator(
         IVerifierApiClient apiClient,
@@ -248,11 +249,17 @@ public sealed class ScanOrchestrator
             ct.ThrowIfCancellationRequested();
 
             var pageSessionId = $"{sessionId}-page-{pageIndex + 1:D2}";
+            AppendTrace(
+                $"full-sync page {pageIndex + 1}: capture-start session={pageSessionId}"
+            );
             var runtimeCaptures = await CaptureExtraScreensAsync(
                 pageSessionId,
                 ct,
                 pageIndex: pageIndex + 1,
                 mode: RuntimeScreenCaptureMode.FullRosterPage
+            );
+            AppendTrace(
+                $"full-sync page {pageIndex + 1}: capture-complete files={runtimeCaptures.Count}"
             );
             RosterScanResult pageScan;
             try
@@ -265,6 +272,9 @@ public sealed class ScanOrchestrator
                     resolution,
                     runtimeCaptures,
                     ct
+                );
+                AppendTrace(
+                    $"full-sync page {pageIndex + 1}: worker-complete agents={pageScan.Agents?.Count ?? 0} error={pageScan.ErrorCode ?? "none"}"
                 );
             }
             finally
@@ -500,31 +510,49 @@ public sealed class ScanOrchestrator
             }
             if (ShouldSkipAmplifierDetailStep(step, currentEquipmentOverview))
             {
+                AppendTrace(
+                    $"capture {sessionId}: step {index + 1} skip amplifier-detail alias={step.ScreenAlias ?? string.Empty}"
+                );
                 skipNextAmplifierExit = true;
                 continue;
             }
             if (ShouldSkipAmplifierExitStep(step, skipNextAmplifierExit))
             {
+                AppendTrace(
+                    $"capture {sessionId}: step {index + 1} skip amplifier-exit alias={step.ScreenAlias ?? string.Empty}"
+                );
                 skipNextAmplifierExit = false;
                 continue;
             }
             if (ShouldSkipDiskDetailStep(step, currentEquipmentOverview))
             {
+                AppendTrace(
+                    $"capture {sessionId}: step {index + 1} skip disk-detail alias={step.ScreenAlias ?? string.Empty} slot={step.SlotIndex?.ToString() ?? "na"}"
+                );
                 skipNextDiskExitSlot = step.SlotIndex;
                 continue;
             }
             if (ShouldSkipDiskExitStep(step, skipNextDiskExitSlot))
             {
+                AppendTrace(
+                    $"capture {sessionId}: step {index + 1} skip disk-exit alias={step.ScreenAlias ?? string.Empty} slot={step.SlotIndex?.ToString() ?? "na"}"
+                );
                 skipNextDiskExitSlot = null;
                 continue;
             }
+            AppendTrace(
+                $"capture {sessionId}: step {index + 1} start role={step.Role} alias={step.ScreenAlias ?? string.Empty} agent={step.AgentSlotIndex?.ToString() ?? "na"} slot={step.SlotIndex?.ToString() ?? "na"} capture={step.Capture}"
+            );
             await ExecuteGameScriptAsync(
                 step.Script ?? string.Empty,
                 step.StepDelayMs,
                 step.PostDelayMs,
                 step.ExpectFrameChange,
-                $"extra capture step {index + 1} ({step.Role})",
+                    $"extra capture step {index + 1} ({step.Role})",
                 ct
+            );
+            AppendTrace(
+                $"capture {sessionId}: step {index + 1} script-complete role={step.Role} alias={step.ScreenAlias ?? string.Empty}"
             );
 
             if (!step.Capture)
@@ -546,6 +574,9 @@ public sealed class ScanOrchestrator
                     $"Scan aborted: game-window capture failed for step {index + 1} ({step.Role})."
                 );
             }
+            AppendTrace(
+                $"capture {sessionId}: step {index + 1} png={Path.GetFileName(outputPath)}"
+            );
 
             captures.Add(
                 new ScreenCaptureInput(
@@ -561,6 +592,9 @@ public sealed class ScanOrchestrator
             if (string.Equals(step.Role, "equipment", StringComparison.OrdinalIgnoreCase))
             {
                 currentEquipmentOverview = await TryInspectEquipmentOverviewAsync(outputPath, ct);
+                AppendTrace(
+                    $"capture {sessionId}: equipment-inspection weaponPresent={(currentEquipmentOverview?.WeaponPresent?.ToString() ?? "null")} discs={(currentEquipmentOverview?.DiscSlotOccupancy?.Count ?? 0)}"
+                );
             }
         }
 
@@ -811,11 +845,24 @@ public sealed class ScanOrchestrator
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
+            AppendTrace(
+                $"script-start context={failureContext} attempt={attempt}/{maxAttempts} expectFrameChange={expectFrameChange} script={script}"
+            );
+            AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=ensure-focus-start");
             await EnsureGameFocusedAsync(ct);
+            AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=ensure-focus-complete");
+            AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=before-hash-start");
             var beforeHash = expectFrameChange ? NormalizeFrameHash(_nativeBridge.CaptureFrameHash()) : string.Empty;
+            AppendTrace(
+                $"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=before-hash-complete empty={string.IsNullOrWhiteSpace(beforeHash)}"
+            );
 
+            AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=execute-start");
             if (!_nativeBridge.ExecuteScanScript(script, stepDelayMs))
             {
+                AppendTrace(
+                    $"script-failed context={failureContext} attempt={attempt}/{maxAttempts} stage=execute"
+                );
                 if (attempt == maxAttempts)
                 {
                     throw new InvalidOperationException($"Scan aborted: {failureContext} failed.");
@@ -827,6 +874,7 @@ public sealed class ScanOrchestrator
                 }
                 continue;
             }
+            AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=execute-complete");
 
             if (postDelayMs > 0)
             {
@@ -838,14 +886,24 @@ public sealed class ScanOrchestrator
                 return;
             }
 
+            AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=after-hash-start");
             var afterHash = NormalizeFrameHash(_nativeBridge.CaptureFrameHash());
+            AppendTrace(
+                $"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=after-hash-complete empty={string.IsNullOrWhiteSpace(afterHash)}"
+            );
             if (string.IsNullOrWhiteSpace(beforeHash) ||
                 string.IsNullOrWhiteSpace(afterHash) ||
                 !string.Equals(beforeHash, afterHash, StringComparison.OrdinalIgnoreCase))
             {
+                AppendTrace(
+                    $"script-success context={failureContext} attempt={attempt}/{maxAttempts}"
+                );
                 return;
             }
 
+            AppendTrace(
+                $"script-failed context={failureContext} attempt={attempt}/{maxAttempts} stage=frame-unchanged"
+            );
             if (attempt == maxAttempts)
             {
                 throw new InvalidOperationException(
@@ -873,12 +931,19 @@ public sealed class ScanOrchestrator
             return true;
         }
 
+        AppendTrace($"script-try-stage script={script} stage=ensure-focus-start");
         await EnsureGameFocusedAsync(ct);
+        AppendTrace($"script-try-stage script={script} stage=ensure-focus-complete");
+        AppendTrace($"script-try-stage script={script} stage=before-hash-start");
         var beforeHash = expectFrameChange ? NormalizeFrameHash(_nativeBridge.CaptureFrameHash()) : string.Empty;
+        AppendTrace($"script-try-stage script={script} stage=before-hash-complete empty={string.IsNullOrWhiteSpace(beforeHash)}");
+        AppendTrace($"script-try-stage script={script} stage=execute-start");
         if (!_nativeBridge.ExecuteScanScript(script, stepDelayMs))
         {
+            AppendTrace($"script-try-failed script={script} stage=execute");
             return false;
         }
+        AppendTrace($"script-try-stage script={script} stage=execute-complete");
 
         if (postDelayMs > 0)
         {
@@ -890,13 +955,18 @@ public sealed class ScanOrchestrator
             return true;
         }
 
+        AppendTrace($"script-try-stage script={script} stage=after-hash-start");
         var afterHash = NormalizeFrameHash(_nativeBridge.CaptureFrameHash());
+        AppendTrace($"script-try-stage script={script} stage=after-hash-complete empty={string.IsNullOrWhiteSpace(afterHash)}");
         if (string.IsNullOrWhiteSpace(beforeHash) || string.IsNullOrWhiteSpace(afterHash))
         {
+            AppendTrace($"script-try-failed script={script} stage=hash-empty");
             return false;
         }
 
-        return !string.Equals(beforeHash, afterHash, StringComparison.OrdinalIgnoreCase);
+        var changed = !string.Equals(beforeHash, afterHash, StringComparison.OrdinalIgnoreCase);
+        AppendTrace($"script-try-complete script={script} changed={changed}");
+        return changed;
     }
 
     private static string NormalizeFrameHash(string? value) =>
@@ -1507,6 +1577,37 @@ public sealed class ScanOrchestrator
             "0" or "false" or "no" or "off" => false,
             _ => fallback,
         };
+    }
+
+    private static void AppendTrace(string message)
+    {
+        var rawPath = Environment.GetEnvironmentVariable("IKA_LIVE_SCAN_TRACE_PATH");
+        if (string.IsNullOrWhiteSpace(rawPath) || string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(rawPath);
+            var directory = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            lock (TraceLock)
+            {
+                File.AppendAllText(
+                    fullPath,
+                    $"[{DateTime.UtcNow:O}] {message}{Environment.NewLine}"
+                );
+            }
+        }
+        catch
+        {
+            // ignored
+        }
     }
 
     private static void DeleteFileQuietly(string? path)

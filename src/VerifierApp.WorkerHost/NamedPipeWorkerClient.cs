@@ -68,7 +68,12 @@ public sealed class NamedPipeWorkerClient : IWorkerClient, IAsyncDisposable
 
     private async Task<T> SendAsync<T>(string method, object payload, CancellationToken ct)
     {
-        await _requestGate.WaitAsync(ct);
+        var timeoutMs = ResolveRequestTimeoutMs(method);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(timeoutMs);
+        var requestCt = timeoutCts.Token;
+
+        await _requestGate.WaitAsync(requestCt);
         try
         {
             var requestId = Guid.NewGuid().ToString("N");
@@ -80,9 +85,9 @@ public sealed class NamedPipeWorkerClient : IWorkerClient, IAsyncDisposable
                 ),
                 JsonOptions
             );
-            await _writer.WriteLineAsync(request);
+            await _writer.WriteLineAsync(request).WaitAsync(requestCt);
 
-            var raw = await _reader.ReadLineAsync().WaitAsync(ct);
+            var raw = await _reader.ReadLineAsync().WaitAsync(requestCt);
             if (string.IsNullOrWhiteSpace(raw))
             {
                 throw new InvalidOperationException($"Worker returned empty response for {method}");
@@ -127,10 +132,35 @@ public sealed class NamedPipeWorkerClient : IWorkerClient, IAsyncDisposable
             return resultNode.Deserialize<T>(JsonOptions)
                    ?? throw new InvalidOperationException($"Worker returned invalid result payload for {method}");
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && timeoutCts.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                $"Worker request timed out after {timeoutMs} ms for {method}."
+            );
+        }
         finally
         {
             _requestGate.Release();
         }
+    }
+
+    private static int ResolveRequestTimeoutMs(string method) =>
+        method switch
+        {
+            "health" => ReadPositiveIntFromEnvironment("IKA_WORKER_HEALTH_TIMEOUT_MS", 10_000),
+            "ocr.inspectEquipmentOverview" => ReadPositiveIntFromEnvironment("IKA_WORKER_EQUIPMENT_TIMEOUT_MS", 15_000),
+            "ocr.scan" => ReadPositiveIntFromEnvironment("IKA_WORKER_SCAN_TIMEOUT_MS", 60_000),
+            _ => ReadPositiveIntFromEnvironment("IKA_WORKER_REQUEST_TIMEOUT_MS", 30_000),
+        };
+
+    private static int ReadPositiveIntFromEnvironment(string envVar, int fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(envVar);
+        return !string.IsNullOrWhiteSpace(raw) &&
+               int.TryParse(raw, out var parsed) &&
+               parsed > 0
+            ? parsed
+            : fallback;
     }
 
     public ValueTask DisposeAsync()
