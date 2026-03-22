@@ -64,14 +64,32 @@ public sealed class ScanOrchestrator
             {
                 throw new InvalidOperationException("Scan aborted: OS input lock failed.");
             }
-            await ExecuteGameScriptAsync(
-                scanScript,
-                scanStepDelayMs,
-                scanPostDelayMs,
-                expectFrameChange: true,
-                failureContext: "native scan automation script",
-                ct
-            );
+
+            var shouldRunScanScript = true;
+            if (string.Equals(scanScript, DefaultLiveEntryScript, StringComparison.OrdinalIgnoreCase))
+            {
+                var entrySurface = await InspectVisibleSliceEntrySurfaceAsync(0, ct);
+                AppendTrace(
+                    $"scan-entry-surface home={entrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={entrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
+                );
+                shouldRunScanScript = !entrySurface.LooksLikeHomeScreen;
+            }
+
+            if (shouldRunScanScript)
+            {
+                await ExecuteGameScriptAsync(
+                    scanScript,
+                    scanStepDelayMs,
+                    scanPostDelayMs,
+                    expectFrameChange: true,
+                    failureContext: "native scan automation script",
+                    ct
+                );
+            }
+            else
+            {
+                AppendTrace("native scan automation script skipped because current live UI is already at a scan entry surface");
+            }
 
             var scan = fullSync
                 ? await ExecuteFullRosterScanAsync(sessionId, regionHint, locale, resolution, ct)
@@ -261,6 +279,18 @@ public sealed class ScanOrchestrator
             AppendTrace(
                 $"full-sync page {pageIndex + 1}: capture-complete files={runtimeCaptures.Count}"
             );
+            if (runtimeCaptures.Count == 0)
+            {
+                if (pageIndex == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Scan aborted: full sync found no scannable roster slots on page 1."
+                    );
+                }
+
+                reachedTerminalSlice = true;
+                break;
+            }
             RosterScanResult pageScan;
             try
             {
@@ -495,6 +525,10 @@ public sealed class ScanOrchestrator
         }
 
         var tempRoot = ResolveRuntimeTempRoot("screen_captures", sessionId);
+        var unavailableAgentSlots = mode == RuntimeScreenCaptureMode.FullRosterPage
+            ? InspectUnavailableFullRosterSlots(sessionId, tempRoot, pageIndex)
+            : new HashSet<int>();
+        var loggedUnavailableAgentSlots = new HashSet<int>();
 
         var captures = new List<ScreenCaptureInput>();
         EquipmentOverviewInspectionResult? currentEquipmentOverview = null;
@@ -507,6 +541,19 @@ public sealed class ScanOrchestrator
             if (step.RequiresVisibleSliceEntry)
             {
                 await EnsureVisibleSliceRosterEntryAsync(ct);
+            }
+            if (ShouldSkipUnavailableAgentSlotStep(step, unavailableAgentSlots))
+            {
+                if (step.AgentSlotIndex is int agentSlotIndex && loggedUnavailableAgentSlots.Add(agentSlotIndex))
+                {
+                    AppendTrace(
+                        $"capture {sessionId}: roster-preflight skip agent-slot {agentSlotIndex}"
+                    );
+                }
+                currentEquipmentOverview = null;
+                skipNextAmplifierExit = false;
+                skipNextDiskExitSlot = null;
+                continue;
             }
             if (ShouldSkipAmplifierDetailStep(step, currentEquipmentOverview))
             {
@@ -601,6 +648,69 @@ public sealed class ScanOrchestrator
         return captures;
     }
 
+    private HashSet<int> InspectUnavailableFullRosterSlots(string sessionId, string tempRoot, int? pageIndex)
+    {
+        if (pageIndex is not int capturePageIndex || capturePageIndex <= 0)
+        {
+            return [];
+        }
+
+        var outputPath = Path.Combine(tempRoot, $"00_roster_preflight_page_{capturePageIndex:D2}.png");
+        try
+        {
+            var windowStatus = _nativeBridge.InspectGameWindowStatus();
+            if (!windowStatus.CanInjectInput)
+            {
+                AppendTrace(
+                    $"capture {sessionId}: roster-preflight skipped reason=window-not-ready"
+                );
+                return [];
+            }
+            if (!TryCaptureRuntimePng(outputPath))
+            {
+                AppendTrace(
+                    $"capture {sessionId}: roster-preflight skipped reason=capture-failed"
+                );
+                return [];
+            }
+
+            var inspections = LiveUiDetector.InspectVisibleRosterSlots(outputPath);
+            if (inspections.Count == 0)
+            {
+                AppendTrace(
+                    $"capture {sessionId}: roster-preflight skipped reason=no-slot-inspections"
+                );
+                return [];
+            }
+            if (!LiveUiDetector.LooksLikeAgentRosterScreen(outputPath))
+            {
+                AppendTrace(
+                    $"capture {sessionId}: roster-preflight skipped reason=not-roster-screen"
+                );
+                return [];
+            }
+
+            AppendTrace(
+                $"capture {sessionId}: roster-preflight {string.Join(", ", inspections.Select(inspection => $"slot={inspection.AgentSlotIndex}:owned={inspection.LooksOwned.ToString().ToLowerInvariant()}:lock={inspection.LockBadgeDetected.ToString().ToLowerInvariant()}:visual_lock={inspection.LooksUnavailableVisualStyle.ToString().ToLowerInvariant()}:badge_lock={inspection.LooksUnavailableByLockBadge.ToString().ToLowerInvariant()}:sat={inspection.MeanCenterSaturation:F1}:color={inspection.CenterColorPixelFraction:F3}:luma={inspection.MeanCenterLuma:F1}"))}"
+            );
+            return inspections
+                .Where(inspection => !inspection.LooksOwned)
+                .Select(inspection => inspection.AgentSlotIndex)
+                .ToHashSet();
+        }
+        catch (Exception ex)
+        {
+            AppendTrace(
+                $"capture {sessionId}: roster-preflight skipped reason={ex.GetType().Name}:{ex.Message}"
+            );
+            return [];
+        }
+        finally
+        {
+            DeleteFileQuietly(outputPath);
+        }
+    }
+
     private async Task<EquipmentOverviewInspectionResult?> TryInspectEquipmentOverviewAsync(
         string imagePath,
         CancellationToken ct
@@ -625,6 +735,13 @@ public sealed class ScanOrchestrator
                equipmentOverview is not null &&
                equipmentOverview.WeaponPresent is false;
     }
+
+    private static bool ShouldSkipUnavailableAgentSlotStep(
+        RuntimeScreenCaptureStep step,
+        IReadOnlySet<int> unavailableAgentSlots
+    ) =>
+        step.AgentSlotIndex is int agentSlotIndex &&
+        unavailableAgentSlots.Contains(agentSlotIndex);
 
     private static bool ShouldSkipAmplifierExitStep(RuntimeScreenCaptureStep step, bool skipNextAmplifierExit)
     {
@@ -727,17 +844,8 @@ public sealed class ScanOrchestrator
         {
             ct.ThrowIfCancellationRequested();
             await EnsureGameFocusedAsync(ct);
-            var stateProbePath = await CaptureVisibleSliceStateProbeAsync(attempt + 1, ct);
-            var looksLikeHomeScreen = false;
-            try
-            {
-                looksLikeHomeScreen = LiveUiDetector.LooksLikeHomeScreen(stateProbePath);
-            }
-            finally
-            {
-                DeleteFileQuietly(stateProbePath);
-            }
-            if (looksLikeHomeScreen &&
+            var entrySurface = await InspectVisibleSliceEntrySurfaceAsync(attempt + 1, ct);
+            if (entrySurface.LooksLikeHomeScreen &&
                 await TryExecuteGameScriptAsync(entryScript, entryStepDelayMs, entryPostDelayMs, expectFrameChange: true, ct))
             {
                 if (entryStabilizeDelayMs > 0)
@@ -773,6 +881,22 @@ public sealed class ScanOrchestrator
         throw new InvalidOperationException(
             "Scan aborted: could not reach the agent roster screen from the current live UI state."
         );
+    }
+
+    private async Task<EntrySurfaceProbe> InspectVisibleSliceEntrySurfaceAsync(int attempt, CancellationToken ct)
+    {
+        var stateProbePath = await CaptureVisibleSliceStateProbeAsync(attempt, ct);
+        try
+        {
+            return new EntrySurfaceProbe(
+                LiveUiDetector.LooksLikeHomeScreen(stateProbePath),
+                LiveUiDetector.LooksLikeAgentRosterScreen(stateProbePath)
+            );
+        }
+        finally
+        {
+            DeleteFileQuietly(stateProbePath);
+        }
     }
 
     private async Task<string> CaptureVisibleSliceStateProbeAsync(int attempt, CancellationToken ct)
@@ -1657,3 +1781,8 @@ public sealed class ScanOrchestrator
 
     private static double Round4(double value) => Math.Round(value, 4);
 }
+
+internal sealed record EntrySurfaceProbe(
+    bool LooksLikeHomeScreen,
+    bool LooksLikeRosterScreen
+);
