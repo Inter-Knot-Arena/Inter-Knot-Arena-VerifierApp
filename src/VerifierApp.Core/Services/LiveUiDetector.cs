@@ -16,11 +16,13 @@ internal static class LiveUiDetector
     private const double SearchRightFraction = 0.77;
     private const double SearchBottomFraction = 0.98;
     private const double MatchThreshold = 0.30;
+    // These boxes must stay aligned with the same top-row cards that the runtime
+    // capture plan clicks via select_agent_1/2/3.
     private static readonly (int AgentSlotIndex, double X, double Y, double Width, double Height)[] VisibleRosterSlotBoxes =
     [
-        (1, 0.527, 0.014, 0.160, 0.194),
-        (2, 0.566, 0.222, 0.133, 0.208),
-        (3, 0.605, 0.479, 0.141, 0.278),
+        (1, 0.532, 0.015, 0.135, 0.235),
+        (2, 0.635, 0.045, 0.120, 0.245),
+        (3, 0.747, 0.000, 0.130, 0.235),
     ];
     private const double RosterSlotCenterInsetFraction = 0.20;
     private const double RosterSlotColorPixelSaturationThreshold = 12.0;
