@@ -1311,12 +1311,25 @@ public sealed class ScanOrchestrator
 
     private static AgentScanResult MergeAgent(AgentScanResult existing, AgentScanResult incoming)
     {
+        var existingKnownEmptyWeapon = IsKnownEmptyAmplifierDetailWeapon(existing);
+        var incomingKnownEmptyWeapon = IsKnownEmptyAmplifierDetailWeapon(incoming);
         var mergedStats = MergeNumberMap(existing.Stats, incoming.Stats);
-        var mergedWeapon = SelectWeapon(existing.Weapon, incoming.Weapon);
+        var mergedWeapon = existingKnownEmptyWeapon || incomingKnownEmptyWeapon
+            ? null
+            : SelectWeapon(existing.Weapon, incoming.Weapon);
         var mergedDiscs = MergeDiscs(existing.Discs, incoming.Discs);
         var mergedConfidence = MergeNumberMap(existing.ConfidenceByField, incoming.ConfidenceByField);
         var mergedFieldSources = MergeStringMap(existing.FieldSources, incoming.FieldSources);
         var mergedOccupancy = MergeBoolMap(existing.DiscSlotOccupancy, incoming.DiscSlotOccupancy);
+        if (existingKnownEmptyWeapon || incomingKnownEmptyWeapon)
+        {
+            var fieldSources = mergedFieldSources is not null
+                ? new Dictionary<string, string>(mergedFieldSources, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            fieldSources["weapon"] = "known_empty_from_amplifier_detail";
+            fieldSources["weaponPresent"] = "amplifier_detail_empty_state";
+            mergedFieldSources = fieldSources;
+        }
 
         return existing with
         {
@@ -1326,7 +1339,9 @@ public sealed class ScanOrchestrator
             MindscapeCap = MaxNumber(existing.MindscapeCap, incoming.MindscapeCap),
             Stats = mergedStats,
             Weapon = mergedWeapon,
-            WeaponPresent = (existing.WeaponPresent ?? false) || (incoming.WeaponPresent ?? false),
+            WeaponPresent = existingKnownEmptyWeapon || incomingKnownEmptyWeapon
+                ? false
+                : (existing.WeaponPresent ?? false) || (incoming.WeaponPresent ?? false),
             DiscSlotOccupancy = mergedOccupancy,
             Discs = mergedDiscs,
             ConfidenceByField = mergedConfidence,
@@ -1442,6 +1457,36 @@ public sealed class ScanOrchestrator
         return output;
     }
 
+    private static bool IsKnownEmptyAmplifierDetailWeapon(AgentScanResult agent)
+    {
+        var weaponSource = agent.FieldSources is not null &&
+                           agent.FieldSources.TryGetValue("weapon", out var rawWeaponSource)
+            ? rawWeaponSource
+            : string.Empty;
+        var weaponPresentSource = agent.FieldSources is not null &&
+                                  agent.FieldSources.TryGetValue("weaponPresent", out var rawWeaponPresentSource)
+            ? rawWeaponPresentSource
+            : string.Empty;
+        return !HasMeaningfulWeapon(agent.Weapon) &&
+               agent.WeaponPresent is false &&
+               string.Equals(weaponSource, "known_empty_from_amplifier_detail", StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(weaponPresentSource, "amplifier_detail_empty_state", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasMeaningfulWeapon(WeaponScanResult? weapon)
+    {
+        return weapon is not null && (
+            !string.IsNullOrWhiteSpace(weapon.WeaponId) ||
+            !string.IsNullOrWhiteSpace(weapon.DisplayName) ||
+            weapon.Level is not null ||
+            weapon.LevelCap is not null ||
+            !string.IsNullOrWhiteSpace(weapon.BaseStatKey) ||
+            weapon.BaseStatValue is not null ||
+            !string.IsNullOrWhiteSpace(weapon.AdvancedStatKey) ||
+            weapon.AdvancedStatValue is not null
+        );
+    }
+
     private static WeaponScanResult? SelectWeapon(WeaponScanResult? left, WeaponScanResult? right)
     {
         if (left is null)
@@ -1475,6 +1520,14 @@ public sealed class ScanOrchestrator
             score += 0.5;
         }
         if (!string.IsNullOrWhiteSpace(weapon.AdvancedStatKey))
+        {
+            score += 0.5;
+        }
+        if (weapon.BaseStatValue is not null)
+        {
+            score += 0.5;
+        }
+        if (weapon.AdvancedStatValue is not null)
         {
             score += 0.5;
         }
@@ -1655,6 +1708,12 @@ public sealed class ScanOrchestrator
     {
         if (captures.Count == 0)
         {
+            return;
+        }
+
+        if (ReadBooleanFlagFromEnvironment("IKA_KEEP_RUNTIME_CAPTURES", false))
+        {
+            AppendTrace("runtime capture cleanup skipped because IKA_KEEP_RUNTIME_CAPTURES=1");
             return;
         }
 

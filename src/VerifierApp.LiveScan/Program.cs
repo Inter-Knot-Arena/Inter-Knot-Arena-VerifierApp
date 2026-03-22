@@ -48,6 +48,20 @@ internal static class Program
                 Path.Combine(Path.GetDirectoryName(repoRoot) ?? repoRoot, "Inter-Knot Arena CV"),
                 Path.Combine(repoRoot, "external", "CV")
             );
+            Console.Error.WriteLine($"[live-scan] repoRoot={repoRoot}");
+            Console.Error.WriteLine($"[live-scan] ocrRoot={ocrRoot ?? "<null>"}");
+            Console.Error.WriteLine($"[live-scan] cvRoot={cvRoot ?? "<null>"}");
+            Console.Error.WriteLine($"[live-scan] pipeName={options.PipeName}");
+            if (!string.IsNullOrWhiteSpace(ocrRoot))
+            {
+                var amplifierPath = Path.Combine(ocrRoot, "amplifier_identity.py");
+                if (File.Exists(amplifierPath))
+                {
+                    Console.Error.WriteLine(
+                        $"[live-scan] ocrAmplifierPath={amplifierPath} mtimeUtc={File.GetLastWriteTimeUtc(amplifierPath):O}"
+                    );
+                }
+            }
 
             using var launcher = new WorkerProcessLauncher();
             launcher.Start(
@@ -539,7 +553,7 @@ internal static class Program
             var locale = "RU";
             var resolution = "1080p";
             var fullSync = false;
-            var pipeName = "ika_verifier_worker";
+            var pipeName = $"ika_verifier_worker_{Guid.NewGuid():N}";
             var connectTimeoutMs = 15_000;
             var workerStartupDelayMs = 1_500;
             string? outputPath = null;
