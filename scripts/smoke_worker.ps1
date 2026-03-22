@@ -1,124 +1,63 @@
 param(
-    [string]$Python = "python",
-    [string]$Locale = "EN",
-    [string]$Resolution = "1080p",
-    [string]$CvPrecheckFrame = "",
-    [string]$CvInrunFrame = "",
-    [string]$UidImage = "",
-    [string[]]$AgentIcons = @(),
-    [string[]]$ScreenCaptures = @()
+    [ValidateSet("Bundled", "Source")]
+    [string]$Mode = "Bundled",
+    [string]$BundleDirectory = "",
+    [string]$FixtureManifest = "",
+    [string]$OcrRoot = "",
+    [string]$WorkerPython = "",
+    [switch]$KeepRuntime
 )
 
 $ErrorActionPreference = "Stop"
 
-function Invoke-PythonJson {
-    param(
-        [string]$WorkingDirectory,
-        [string[]]$Arguments
-    )
-
-    Push-Location $WorkingDirectory
-    try {
-        $raw = & $Python @Arguments
-        if ($LASTEXITCODE -ne 0) {
-            throw "Command failed ($LASTEXITCODE): $Python $($Arguments -join ' ')"
-        }
-        return ($raw -join "`n") | ConvertFrom-Json
-    }
-    finally {
-        Pop-Location
-    }
-}
-
 $root = Split-Path -Parent $PSScriptRoot
-$ocrRoot = Join-Path $root "external\OCR_Scan"
-$cvRoot = Join-Path $root "external\CV"
+$helperPath = Join-Path $PSScriptRoot "smoke_worker.py"
 
-if (-not (Test-Path $ocrRoot)) {
-    throw "OCR submodule not found: $ocrRoot"
-}
-if (-not (Test-Path $cvRoot)) {
-    throw "CV submodule not found: $cvRoot"
-}
+function Resolve-PythonExecutable {
+    param([string]$ExplicitPython)
 
-Write-Host "==> OCR smoke"
-$ocrArgs = @("scripts/run_scan.py")
-if ([string]::IsNullOrWhiteSpace($UidImage) -and $AgentIcons.Count -eq 0 -and $ScreenCaptures.Count -eq 0) {
-    $ocrArgs += @("--seed", "smoke", "--region", "EU", "--full-sync")
-}
-else {
-    $ocrArgs += @(
-        "--input-lock",
-        "--anchor-profile",
-        "--anchor-agents",
-        "--anchor-equipment",
-        "--locale", $Locale,
-        "--resolution", $Resolution
+    $candidates = @(
+        $ExplicitPython,
+        (Join-Path $root "worker\\.venv\\Scripts\\python.exe"),
+        "python"
     )
-    if (-not [string]::IsNullOrWhiteSpace($UidImage)) {
-        $ocrArgs += @("--uid-image", $UidImage)
-    }
-    foreach ($iconPath in $AgentIcons) {
-        if (-not [string]::IsNullOrWhiteSpace($iconPath)) {
-            $ocrArgs += @("--agent-icon", $iconPath)
+
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
+
+        if ($candidate -eq "python") {
+            return $candidate
+        }
+
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
         }
     }
-    foreach ($capture in $ScreenCaptures) {
-        if (-not [string]::IsNullOrWhiteSpace($capture)) {
-            $ocrArgs += @("--screen-capture", $capture)
-        }
-    }
-}
-$ocrResult = Invoke-PythonJson -WorkingDirectory $ocrRoot -Arguments $ocrArgs
 
-Write-Host "==> CV precheck smoke"
-$cvPrecheckArgs = @(
-    "scripts/run_match_check.py",
-    "--mode", "PRECHECK",
-    "--expected", "agent_anby,agent_nicole,agent_ellen",
-    "--detected", "agent_anby,agent_nicole,agent_ellen",
-    "--locale", $Locale,
-    "--resolution", $Resolution
+    throw "Could not resolve a python executable for smoke_worker.py."
+}
+
+$pythonExe = Resolve-PythonExecutable -ExplicitPython $WorkerPython
+$arguments = @(
+    $helperPath,
+    "--mode", $Mode
 )
-if (-not [string]::IsNullOrWhiteSpace($CvPrecheckFrame)) {
-    $cvPrecheckArgs += @("--frame-path", $CvPrecheckFrame)
+if (-not [string]::IsNullOrWhiteSpace($BundleDirectory)) {
+    $arguments += @("--bundle-dir", $BundleDirectory)
 }
-$cvPrecheckResult = Invoke-PythonJson -WorkingDirectory $cvRoot -Arguments $cvPrecheckArgs
-
-Write-Host "==> CV inrun smoke"
-$cvInrunArgs = @(
-    "scripts/run_match_check.py",
-    "--mode", "INRUN",
-    "--expected", "agent_anby,agent_nicole,agent_ellen",
-    "--detected", "agent_anby,agent_nicole,agent_ellen",
-    "--history", "agent_anby,agent_nicole,agent_ellen",
-    "--locale", $Locale,
-    "--resolution", $Resolution
-)
-if (-not [string]::IsNullOrWhiteSpace($CvInrunFrame)) {
-    $cvInrunArgs += @("--frame-path", $CvInrunFrame)
+if (-not [string]::IsNullOrWhiteSpace($FixtureManifest)) {
+    $arguments += @("--fixture-manifest", $FixtureManifest)
 }
-$cvInrunResult = Invoke-PythonJson -WorkingDirectory $cvRoot -Arguments $cvInrunArgs
-
-$summary = [ordered]@{
-    ocr = [ordered]@{
-        modelVersion = $ocrResult.modelVersion
-        dataVersion = $ocrResult.dataVersion
-        uid = $ocrResult.uid
-        lowConfReasons = $ocrResult.lowConfReasons
-    }
-    precheck = [ordered]@{
-        result = $cvPrecheckResult.result
-        modelVersion = $cvPrecheckResult.modelVersion
-        dataVersion = $cvPrecheckResult.dataVersion
-        lowConfReasons = $cvPrecheckResult.lowConfReasons
-    }
-    inrun = [ordered]@{
-        result = $cvInrunResult.result
-        modelVersion = $cvInrunResult.modelVersion
-        dataVersion = $cvInrunResult.dataVersion
-        lowConfReasons = $cvInrunResult.lowConfReasons
-    }
+if (-not [string]::IsNullOrWhiteSpace($OcrRoot)) {
+    $arguments += @("--ocr-root", $OcrRoot)
+}
+if ($KeepRuntime) {
+    $arguments += "--keep-runtime"
 }
 
-$summary | ConvertTo-Json -Depth 6
+& $pythonExe @arguments
+if ($LASTEXITCODE -ne 0) {
+    throw "smoke_worker.py failed with exit code $LASTEXITCODE."
+}

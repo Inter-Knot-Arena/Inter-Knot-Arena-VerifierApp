@@ -25,7 +25,11 @@ $nativeSourceDir = Join-Path $root "native\\ika_native"
 $nativeBuildDir = Join-Path $root "native\\ika_native\\build\\release"
 $workerDir = Join-Path $root "worker"
 $bundleDir = Join-Path $root "src\\VerifierApp.UI\\Bundled"
-$workerExePath = Join-Path $workerDir "dist\\VerifierWorker.exe"
+$bundleCudaDir = Join-Path $bundleDir "cuda"
+$workerDistDir = Join-Path $workerDir "dist\\VerifierWorker"
+$workerBundlePath = Join-Path $bundleDir "VerifierWorker_bundle.zip"
+$workerPythonExe = Join-Path $workerDir ".venv\\Scripts\\python.exe"
+$workerPyInstallerExe = Join-Path $workerDir ".venv\\Scripts\\pyinstaller.exe"
 $nativeDllPathCandidates = @(
     (Join-Path $nativeBuildDir "ika_native.dll"),
     (Join-Path $nativeBuildDir "$Configuration\\ika_native.dll"),
@@ -49,39 +53,86 @@ function New-BundleArchive {
         throw "Bundle source directory not found: $SourceDir"
     }
 
-    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ika_bundle_" + [guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+    $cleanupPatterns = @(
+        ".git",
+        ".github",
+        "__pycache__",
+        ".venv"
+    )
+
+    if (Test-Path $DestinationZip) {
+        Remove-Item $DestinationZip -Force
+    }
+
+    $sourceRoot = (Resolve-Path $SourceDir).Path
+    $sourceRootWithSlash = if ($sourceRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $sourceRoot
+    }
+    else {
+        $sourceRoot + [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $archive = [System.IO.Compression.ZipFile]::Open(
+        $DestinationZip,
+        [System.IO.Compression.ZipArchiveMode]::Create
+    )
     try {
-        Copy-Item (Join-Path $SourceDir "*") -Destination $tempRoot -Recurse -Force
+        Get-ChildItem -Path $sourceRoot -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $file = $_
+            $segments = $file.FullName.Substring($sourceRootWithSlash.Length).Split([System.IO.Path]::DirectorySeparatorChar)
+            $shouldSkip = $false
+            foreach ($segment in $segments) {
+                if ($cleanupPatterns -contains $segment) {
+                    $shouldSkip = $true
+                    break
+                }
+            }
+            if ($shouldSkip -or $file.Extension -eq ".pyc") {
+                return
+            }
 
-        $cleanupPatterns = @(
-            ".git",
-            ".github",
-            "__pycache__",
-            ".venv"
-        )
-        foreach ($pattern in $cleanupPatterns) {
-            Get-ChildItem -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {
-                $_.Name -eq $pattern
-            } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        Get-ChildItem -Path $tempRoot -Recurse -Include *.pyc -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-
-        if (Test-Path $DestinationZip) {
-            Remove-Item $DestinationZip -Force
-        }
-        [System.IO.Compression.ZipFile]::CreateFromDirectory(
-            $tempRoot,
-            $DestinationZip,
-            [System.IO.Compression.CompressionLevel]::Optimal,
-            $false
-        )
-    } finally {
-        if (Test-Path $tempRoot) {
-            Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+            $entryName = [string]::Join("/", $segments)
+            $entry = $archive.CreateEntry($entryName, [System.IO.Compression.CompressionLevel]::Optimal)
+            $entryStream = $entry.Open()
+            try {
+                $fileStream = [System.IO.File]::OpenRead($file.FullName)
+                try {
+                    $fileStream.CopyTo($entryStream)
+                }
+                finally {
+                    $fileStream.Dispose()
+                }
+            }
+            finally {
+                $entryStream.Dispose()
+            }
         }
     }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function New-ArchiveFromDirectory {
+    param(
+        [string]$SourceDir,
+        [string]$DestinationZip
+    )
+
+    if (-not (Test-Path $SourceDir)) {
+        throw "Archive source directory not found: $SourceDir"
+    }
+
+    if (Test-Path $DestinationZip) {
+        Remove-Item $DestinationZip -Force
+    }
+
+    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+        $SourceDir,
+        $DestinationZip,
+        [System.IO.Compression.CompressionLevel]::Optimal,
+        $false
+    )
 }
 
 function Resolve-BundleSourceDir {
@@ -105,16 +156,200 @@ function Resolve-BundleSourceDir {
     throw "$Name source directory not found. Checked: $($Candidates -join ', ')"
 }
 
+function Test-OcrBundleSourceContract {
+    param(
+        [string]$PythonExe,
+        [string]$SourceDir
+    )
+
+    $validationScript = @'
+import importlib
+import os
+import sys
+
+root = os.environ["IKA_VALIDATE_OCR_ROOT"]
+sys.path.insert(0, root)
+module = importlib.import_module("scanner")
+required = ("scan_roster", "ScanFailure", "inspect_equipment_capture")
+missing = [name for name in required if not hasattr(module, name)]
+if missing:
+    raise SystemExit("Missing OCR runtime exports: " + ", ".join(missing))
+print("ocr_contract_ok")
+'@
+
+    $previousRoot = $env:IKA_VALIDATE_OCR_ROOT
+    $env:IKA_VALIDATE_OCR_ROOT = $SourceDir
+    try {
+        @($validationScript) | & $PythonExe -
+        if ($LASTEXITCODE -ne 0) {
+            throw "OCR bundle contract validation failed for source: $SourceDir"
+        }
+    }
+    finally {
+        if ($null -eq $previousRoot) {
+            Remove-Item Env:\IKA_VALIDATE_OCR_ROOT -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:IKA_VALIDATE_OCR_ROOT = $previousRoot
+        }
+    }
+}
+
+function Get-BundleSourceMetadata {
+    param(
+        [string]$Name,
+        [string]$SourceDir,
+        [string]$WorkspaceRoot,
+        [string]$ExternalRoot
+    )
+
+    $resolvedWorkspaceRoot = if (Test-Path $WorkspaceRoot) {
+        (Resolve-Path $WorkspaceRoot).Path
+    }
+    else {
+        ""
+    }
+    $resolvedExternalRoot = if (Test-Path $ExternalRoot) {
+        (Resolve-Path $ExternalRoot).Path
+    }
+    else {
+        ""
+    }
+
+    $sourceKind = if ([string]::IsNullOrWhiteSpace($SourceDir)) {
+        "unknown"
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($resolvedWorkspaceRoot) -and $SourceDir -eq $resolvedWorkspaceRoot) {
+        "workspace"
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($resolvedExternalRoot) -and $SourceDir -eq $resolvedExternalRoot) {
+        "external"
+    }
+    else {
+        "override"
+    }
+
+    $branch = $null
+    $commit = $null
+    try {
+        $branch = (& git -C $SourceDir rev-parse --abbrev-ref HEAD 2>$null).Trim()
+        $commit = (& git -C $SourceDir rev-parse HEAD 2>$null).Trim()
+    }
+    catch {
+        $branch = $null
+        $commit = $null
+    }
+
+    return @{
+        name = $Name
+        sourceDir = $SourceDir
+        sourceKind = $sourceKind
+        branch = if ([string]::IsNullOrWhiteSpace($branch)) { $null } else { $branch }
+        commit = if ([string]::IsNullOrWhiteSpace($commit)) { $null } else { $commit }
+    }
+}
+
+function Resolve-CudaRuntimeSourceDir {
+    $explicitDir = $env:IKA_CUDA_DLL_DIR
+    if (-not [string]::IsNullOrWhiteSpace($explicitDir) -and (Test-Path $explicitDir)) {
+        return (Resolve-Path $explicitDir).Path
+    }
+
+    $probeScript = @'
+import pathlib
+import sys
+
+try:
+    import torch
+except Exception:
+    raise SystemExit(1)
+
+lib_dir = pathlib.Path(torch.__file__).resolve().parent / "lib"
+markers = list(lib_dir.glob("cublasLt64_*.dll"))
+if lib_dir.is_dir() and markers:
+    print(lib_dir)
+    raise SystemExit(0)
+raise SystemExit(1)
+'@
+
+    foreach ($candidate in @(@("py", "-3.12"), @("python", ""))) {
+        $executable = $candidate[0]
+        $prefixArgument = $candidate[1]
+        $arguments = @()
+        if (-not [string]::IsNullOrWhiteSpace($prefixArgument)) {
+            $arguments += $prefixArgument
+        }
+        try {
+            $raw = @($probeScript) | & $executable @arguments -
+            if ($LASTEXITCODE -eq 0) {
+                $resolved = ($raw -join "").Trim()
+                if (-not [string]::IsNullOrWhiteSpace($resolved) -and (Test-Path $resolved)) {
+                    return (Resolve-Path $resolved).Path
+                }
+            }
+        }
+        catch {
+            continue
+        }
+    }
+
+    throw "Could not locate a CUDA runtime DLL directory. Set IKA_CUDA_DLL_DIR to a torch\\lib folder with CUDA DLLs."
+}
+
+function Copy-CudaRuntimeDlls {
+    param(
+        [string]$SourceDir,
+        [string]$DestinationDir
+    )
+
+    $patterns = @(
+        "cublas*.dll",
+        "cudart*.dll",
+        "cudnn*.dll",
+        "cufft*.dll",
+        "curand*.dll",
+        "cusolver*.dll",
+        "cusparse*.dll",
+        "nvJitLink*.dll",
+        "nvrtc*.dll",
+        "nvToolsExt*.dll",
+        "zlibwapi.dll"
+    )
+
+    if (Test-Path $DestinationDir) {
+        Remove-Item $DestinationDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
+
+    $copied = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($pattern in $patterns) {
+        foreach ($file in Get-ChildItem -Path $SourceDir -Filter $pattern -File -ErrorAction SilentlyContinue) {
+            if ($copied.Add($file.Name)) {
+                Copy-Item $file.FullName -Destination (Join-Path $DestinationDir $file.Name) -Force
+            }
+        }
+    }
+
+    $required = @("cublasLt64_12.dll", "cudart64_12.dll", "cudnn64_9.dll")
+    foreach ($name in $required) {
+        if (-not (Test-Path (Join-Path $DestinationDir $name))) {
+            throw "CUDA runtime bundle is missing required dependency: $name"
+        }
+    }
+
+    return (Get-ChildItem -Path $DestinationDir -Filter *.dll -File | Sort-Object Name)
+}
+
 $ocrRepoDir = Resolve-BundleSourceDir -Name "OCR bundle" -Candidates @(
     $env:IKA_OCR_REPO_DIR,
-    (Join-Path $root "external\\OCR_Scan"),
-    (Join-Path $workspaceRoot "Inter-Knot Arena OCR_Scan")
+    (Join-Path $workspaceRoot "Inter-Knot Arena OCR_Scan"),
+    (Join-Path $root "external\\OCR_Scan")
 )
 
 $cvRepoDir = Resolve-BundleSourceDir -Name "CV bundle" -Candidates @(
     $env:IKA_CV_REPO_DIR,
-    (Join-Path $root "external\\CV"),
-    (Join-Path $workspaceRoot "Inter-Knot Arena CV")
+    (Join-Path $workspaceRoot "Inter-Knot Arena CV"),
+    (Join-Path $root "external\\CV")
 )
 
 Write-Host "==> Building native module (ika_native.dll)"
@@ -147,42 +382,69 @@ if (-not $nativeDllPath) {
     throw "Native DLL not found after build. Checked: $($nativeDllPathCandidates -join ', ')"
 }
 
-Write-Host "==> Building python worker (VerifierWorker.exe)"
+Write-Host "==> Building python worker (VerifierWorker onedir bundle)"
 Push-Location $workerDir
 Invoke-ExternalStep -Name "Python venv" -Action {
-    py -3.12 -m venv .venv
+    if (-not (Test-Path $workerPythonExe)) {
+        py -3.12 -m venv .venv
+    }
 }
 Invoke-ExternalStep -Name "Pip upgrade" -Action {
-    .\\.venv\\Scripts\\python -m pip install --upgrade pip
+    & $workerPythonExe -m pip install --upgrade pip
 }
 Invoke-ExternalStep -Name "Pip requirements" -Action {
-    .\\.venv\\Scripts\\python -m pip install -r requirements.txt
+    & $workerPythonExe -m pip install -r requirements.txt
 }
 Invoke-ExternalStep -Name "Pip pyinstaller" -Action {
-    .\\.venv\\Scripts\\python -m pip install pyinstaller
+    & $workerPythonExe -m pip install pyinstaller
 }
 Invoke-ExternalStep -Name "PyInstaller build" -Action {
-    .\\.venv\\Scripts\\pyinstaller VerifierWorker.spec --noconfirm --clean
+    & $workerPyInstallerExe VerifierWorker.spec --noconfirm --clean
 }
 Pop-Location
 
 Write-Host "==> Staging bundled assets into UI project"
 New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
-Copy-Item $workerExePath -Destination (Join-Path $bundleDir "VerifierWorker.exe") -Force
+if (Test-Path $workerBundlePath) {
+    Remove-Item $workerBundlePath -Force
+}
+if (Test-Path (Join-Path $bundleDir "VerifierWorker.exe")) {
+    Remove-Item (Join-Path $bundleDir "VerifierWorker.exe") -Force -ErrorAction SilentlyContinue
+}
+New-ArchiveFromDirectory -SourceDir $workerDistDir -DestinationZip $workerBundlePath
 Copy-Item $nativeDllPath -Destination (Join-Path $bundleDir "ika_native.dll") -Force
+$cudaRuntimeSourceDir = Resolve-CudaRuntimeSourceDir
+$cudaRuntimeFiles = Copy-CudaRuntimeDlls -SourceDir $cudaRuntimeSourceDir -DestinationDir $bundleCudaDir
 Write-Host "==> Building OCR/CV bundle archives"
+Test-OcrBundleSourceContract -PythonExe $workerPythonExe -SourceDir $ocrRepoDir
 New-BundleArchive -SourceDir $ocrRepoDir -DestinationZip $ocrBundlePath
 New-BundleArchive -SourceDir $cvRepoDir -DestinationZip $cvBundlePath
 
 Write-Host "==> Generating bundle integrity manifest"
 $manifest = @{
     generatedAt = (Get-Date).ToString("o")
+    cudaRuntimeFiles = @($cudaRuntimeFiles | ForEach-Object { $_.Name })
+    sources = @{
+        ocr = Get-BundleSourceMetadata `
+            -Name "ocr" `
+            -SourceDir $ocrRepoDir `
+            -WorkspaceRoot (Join-Path $workspaceRoot "Inter-Knot Arena OCR_Scan") `
+            -ExternalRoot (Join-Path $root "external\\OCR_Scan")
+        cv = Get-BundleSourceMetadata `
+            -Name "cv" `
+            -SourceDir $cvRepoDir `
+            -WorkspaceRoot (Join-Path $workspaceRoot "Inter-Knot Arena CV") `
+            -ExternalRoot (Join-Path $root "external\\CV")
+    }
     sha256 = @{
-        "VerifierWorker.exe" = (Get-FileHash -Algorithm SHA256 (Join-Path $bundleDir "VerifierWorker.exe")).Hash.ToLowerInvariant()
+        "VerifierWorker_bundle.zip" = (Get-FileHash -Algorithm SHA256 $workerBundlePath).Hash.ToLowerInvariant()
         "ika_native.dll" = (Get-FileHash -Algorithm SHA256 (Join-Path $bundleDir "ika_native.dll")).Hash.ToLowerInvariant()
         "ocr_scan_bundle.zip" = (Get-FileHash -Algorithm SHA256 $ocrBundlePath).Hash.ToLowerInvariant()
         "cv_bundle.zip" = (Get-FileHash -Algorithm SHA256 $cvBundlePath).Hash.ToLowerInvariant()
     }
+}
+foreach ($file in $cudaRuntimeFiles) {
+    $manifest.sha256[$file.Name] = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $bundleManifestPath -Encoding UTF8
 
@@ -199,6 +461,13 @@ Invoke-ExternalStep -Name "dotnet publish" -Action {
         "-p:ApiOrigin=$ApiOrigin" `
         -o $artifactRoot
 }
+
+Copy-Item $workerBundlePath -Destination (Join-Path $artifactRoot "VerifierWorker_bundle.zip") -Force
+$publishCudaDir = Join-Path $artifactRoot "cuda"
+if (Test-Path $publishCudaDir) {
+    Remove-Item $publishCudaDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+Copy-Item $bundleCudaDir -Destination $publishCudaDir -Recurse -Force
 
 Write-Host "Build output: $artifactRoot"
 Write-Host "Primary artifact: $(Join-Path $artifactRoot 'VerifierApp.exe')"

@@ -15,7 +15,7 @@ public sealed record BundledAssetPaths(
 
 public static class BundledAssetManager
 {
-    private const string WorkerResourceName = "Bundled/VerifierWorker.exe";
+    private const string WorkerBundleResourceName = "Bundled/VerifierWorker_bundle.zip";
     private const string NativeResourceName = "Bundled/ika_native.dll";
     private const string OcrBundleResourceName = "Bundled/ocr_scan_bundle.zip";
     private const string CvBundleResourceName = "Bundled/cv_bundle.zip";
@@ -35,14 +35,15 @@ public static class BundledAssetManager
             Path.Combine(AppContext.BaseDirectory, "bundle.manifest.json"),
             expectedHash: null
         );
-        var hashes = LoadHashManifest(manifestPath);
+        var manifest = LoadBundleManifest(manifestPath);
+        var hashes = manifest.Sha256;
 
-        var workerPath = ResolveAssetPath(
+        var workerBundlePath = ResolveAssetPath(
             resourceAssembly,
-            WorkerResourceName,
-            Path.Combine(root, "VerifierWorker.exe"),
-            Path.Combine(AppContext.BaseDirectory, "VerifierWorker.exe"),
-            hashes.GetValueOrDefault("VerifierWorker.exe")
+            WorkerBundleResourceName,
+            Path.Combine(root, "VerifierWorker_bundle.zip"),
+            Path.Combine(AppContext.BaseDirectory, "VerifierWorker_bundle.zip"),
+            hashes.GetValueOrDefault("VerifierWorker_bundle.zip")
         );
         var nativePath = ResolveAssetPath(
             resourceAssembly,
@@ -65,7 +66,26 @@ public static class BundledAssetManager
             Path.Combine(AppContext.BaseDirectory, "cv_bundle.zip"),
             hashes.GetValueOrDefault("cv_bundle.zip")
         );
+        foreach (var fileName in manifest.CudaRuntimeFiles)
+        {
+            ResolveAssetPath(
+                resourceAssembly,
+                $"Bundled/cuda/{fileName}",
+                Path.Combine(root, "cuda", fileName),
+                Path.Combine(AppContext.BaseDirectory, "cuda", fileName),
+                hashes.GetValueOrDefault(fileName)
+            );
+        }
 
+        var workerRoot = Path.Combine(root, "worker");
+        EnsureArchiveExtracted(workerBundlePath, workerRoot, hashes.GetValueOrDefault("VerifierWorker_bundle.zip"));
+        var workerPath = Path.Combine(workerRoot, "VerifierWorker.exe");
+        if (!File.Exists(workerPath))
+        {
+            throw new InvalidOperationException(
+                $"Extracted worker bundle is missing VerifierWorker.exe at '{workerPath}'."
+            );
+        }
         var ocrRoot = Path.Combine(root, "ocr_scan");
         var cvRoot = Path.Combine(root, "cv");
         EnsureArchiveExtracted(ocrBundlePath, ocrRoot, hashes.GetValueOrDefault("ocr_scan_bundle.zip"));
@@ -74,30 +94,45 @@ public static class BundledAssetManager
         return new BundledAssetPaths(root, workerPath, nativePath, ocrRoot, cvRoot);
     }
 
-    private static Dictionary<string, string> LoadHashManifest(string manifestPath)
+    private static BundleManifestData LoadBundleManifest(string manifestPath)
     {
         if (!File.Exists(manifestPath))
         {
-            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            return new BundleManifestData(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                new List<string>()
+            );
         }
 
         using var stream = File.OpenRead(manifestPath);
         using var doc = JsonDocument.Parse(stream);
-        if (!doc.RootElement.TryGetProperty("sha256", out var shaNode) || shaNode.ValueKind != JsonValueKind.Object)
+        var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (doc.RootElement.TryGetProperty("sha256", out var shaNode) && shaNode.ValueKind == JsonValueKind.Object)
         {
-            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var property in shaNode.EnumerateObject())
-        {
-            var value = property.Value.GetString();
-            if (!string.IsNullOrWhiteSpace(value))
+            foreach (var property in shaNode.EnumerateObject())
             {
-                result[property.Name] = value.Trim().ToLowerInvariant();
+                var value = property.Value.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    hashes[property.Name] = value.Trim().ToLowerInvariant();
+                }
             }
         }
-        return result;
+
+        var cudaRuntimeFiles = new List<string>();
+        if (doc.RootElement.TryGetProperty("cudaRuntimeFiles", out var cudaNode) && cudaNode.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in cudaNode.EnumerateArray())
+            {
+                var value = item.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    cudaRuntimeFiles.Add(value.Trim());
+                }
+            }
+        }
+
+        return new BundleManifestData(hashes, cudaRuntimeFiles);
     }
 
     private static string ResolveAssetPath(
@@ -111,6 +146,11 @@ public static class BundledAssetManager
         if (IsValidAsset(outputPath, expectedHash))
         {
             return outputPath;
+        }
+        var outputDirectory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            Directory.CreateDirectory(outputDirectory);
         }
         if (File.Exists(outputPath))
         {
@@ -181,4 +221,9 @@ public static class BundledAssetManager
         var actual = Convert.ToHexStringLower(digest);
         return string.Equals(actual, expectedHash.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
     }
+
+    private sealed record BundleManifestData(
+        Dictionary<string, string> Sha256,
+        List<string> CudaRuntimeFiles
+    );
 }

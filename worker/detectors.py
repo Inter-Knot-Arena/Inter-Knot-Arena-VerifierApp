@@ -19,19 +19,30 @@ except Exception:  # pragma: no cover - optional dependency
 
 _DXCAM_LOCK = threading.Lock()
 _DXCAM_CAMERA = None
+_BOOTSTRAP_EXPLICIT = False
+_BOOTSTRAP_CANDIDATES: list[str] = []
+_BOOTSTRAP_EXISTING: list[str] = []
 
 
 def _candidate_roots() -> list[Path]:
     roots: list[Path] = []
+    explicit_roots: list[Path] = []
 
-    env_paths = [
-        os.getenv("IKA_OCR_SCAN_ROOT", ""),
-        os.getenv("IKA_CV_ROOT", ""),
-        os.getenv("IKA_BUNDLE_ROOT", ""),
-    ]
-    for value in env_paths:
-        if value:
-            roots.append(Path(value).resolve())
+    ocr_root = os.getenv("IKA_OCR_SCAN_ROOT", "").strip()
+    cv_root = os.getenv("IKA_CV_ROOT", "").strip()
+    bundle_root = os.getenv("IKA_BUNDLE_ROOT", "").strip()
+
+    if ocr_root:
+        explicit_roots.append(Path(ocr_root).resolve())
+    if cv_root:
+        explicit_roots.append(Path(cv_root).resolve())
+    if bundle_root:
+        bundle = Path(bundle_root).resolve()
+        explicit_roots.extend([bundle / "ocr_scan", bundle / "cv", bundle])
+
+    if explicit_roots:
+        roots.extend(explicit_roots)
+        return _dedupe_roots(roots)
 
     here = Path(__file__).resolve()
     roots.append(here.parents[2] / "Inter-Knot Arena OCR_Scan")
@@ -41,11 +52,10 @@ def _candidate_roots() -> list[Path]:
     roots.append(here.parents[1] / "worker" / "ocr_scan")
     roots.append(here.parents[1] / "worker" / "cv")
 
-    bundle_root = os.getenv("IKA_BUNDLE_ROOT")
-    if bundle_root:
-        bundle = Path(bundle_root).resolve()
-        roots.extend([bundle / "ocr_scan", bundle / "cv"])
+    return _dedupe_roots(roots)
 
+
+def _dedupe_roots(roots: Sequence[Path]) -> list[Path]:
     unique: list[Path] = []
     seen: set[str] = set()
     for root in roots:
@@ -58,6 +68,18 @@ def _candidate_roots() -> list[Path]:
 
 
 def _bootstrap_paths() -> None:
+    global _BOOTSTRAP_EXPLICIT, _BOOTSTRAP_CANDIDATES, _BOOTSTRAP_EXISTING
+    _BOOTSTRAP_EXPLICIT = any(
+        bool(os.getenv(name, "").strip())
+        for name in ("IKA_OCR_SCAN_ROOT", "IKA_CV_ROOT", "IKA_BUNDLE_ROOT")
+    )
+    candidate_roots = _candidate_roots()
+    _BOOTSTRAP_CANDIDATES = [str(root) for root in candidate_roots]
+    _BOOTSTRAP_EXISTING = [str(root) for root in candidate_roots if root.exists()]
+    if _BOOTSTRAP_EXPLICIT and not _BOOTSTRAP_EXISTING:
+        raise RuntimeError(
+            "Worker bootstrap failed: explicit OCR/CV bundle roots were provided but none of them exist."
+        )
     for root in reversed(_candidate_roots()):
         if root.exists():
             path = str(root)
@@ -100,6 +122,41 @@ def _load_cv_runtime():
     module = importlib.import_module("runtime.matcher")
     evaluate_fn = getattr(module, "evaluate_detection")
     return evaluate_fn
+
+
+def _module_origin(module_name: str) -> str | None:
+    module = sys.modules.get(module_name)
+    if module is None:
+        return None
+    module_path = getattr(module, "__file__", None)
+    return str(module_path) if module_path else None
+
+
+def get_worker_health_details() -> Dict[str, Any]:
+    scan_roster, scan_failure_cls = _load_ocr_runtime()
+    inspect_equipment = _load_ocr_equipment_inspector()
+    if not callable(scan_roster):
+        raise RuntimeError("OCR runtime contract invalid: scan_roster is not callable.")
+    if not callable(inspect_equipment):
+        raise RuntimeError("OCR runtime contract invalid: inspect_equipment_capture is not callable.")
+    return {
+        "ok": True,
+        "bootstrap": {
+            "explicitRoots": _BOOTSTRAP_EXPLICIT,
+            "candidateRoots": list(_BOOTSTRAP_CANDIDATES),
+            "resolvedRoots": list(_BOOTSTRAP_EXISTING),
+        },
+        "ocrRuntime": {
+            "scannerModulePath": _module_origin("scanner"),
+            "scanFailureType": getattr(scan_failure_cls, "__name__", str(scan_failure_cls)),
+            "equipmentInspectorAvailable": True,
+        },
+    }
+
+
+def worker_healthcheck() -> bool:
+    get_worker_health_details()
+    return True
 
 
 def _safe_list(values: Any) -> list[str]:
@@ -292,6 +349,12 @@ def _build_roster_context(payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
         "uidCandidates": uid_candidates,
         "agents": agents_raw,
     }
+    uid_image_path = str(payload.get("uidImagePath", "")).strip()
+    if uid_image_path:
+        session_context["uidImagePath"] = uid_image_path
+    agent_icon_paths = payload.get("agentIconPaths")
+    if isinstance(agent_icon_paths, list) and agent_icon_paths:
+        session_context["agentIconPaths"] = list(agent_icon_paths)
     raw_screen_captures = payload.get("screenCaptures")
     if isinstance(raw_screen_captures, list) and raw_screen_captures:
         session_context["screenCaptures"] = list(raw_screen_captures)

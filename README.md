@@ -16,7 +16,7 @@ Desktop verifier for Inter-Knot Arena with:
 - `src/VerifierApp.ApiClient` - typed HTTP client for Inter-Knot Arena API
 - `src/VerifierApp.Auth` - PKCE + loopback callback + DPAPI token store
 - `src/VerifierApp.WorkerHost` - named pipe worker bridge + native P/Invoke
-- `worker/` - Python worker (JSON-RPC over named pipe)
+- `worker/` - Python worker (line-delimited JSON envelopes over named pipe)
 - `native/ika_native` - C++ DLL bridge (`ika_native.dll`)
 - `scripts/build.ps1` - build + publish pipeline
 
@@ -27,7 +27,7 @@ Desktop verifier for Inter-Knot Arena with:
 3. Loopback callback receives `requestId + code`.
 4. UI exchanges code for bearer verifier tokens and stores them via DPAPI.
 5. `VerifierApp.exe` extracts bundled worker/native assets to `%LOCALAPPDATA%`.
-6. UI starts `VerifierWorker.exe` and talks over named pipe.
+6. UI extracts `VerifierWorker_bundle.zip`, starts `VerifierWorker.exe` from the extracted onedir runtime, and talks over named pipe.
 7. Worker executes `ocr.scan`, `cv.precheck`, `cv.inrun`.
 8. Native module provides OS-level input lock and real desktop frame hash capture.
 9. Bundled OCR/CV zip packages are integrity-checked and extracted before worker startup.
@@ -57,22 +57,32 @@ Set-Location "Inter-Knot Arena VerifierApp"
 Output:
 
 - Single-file app: `artifacts/publish/win-x64/VerifierApp.exe`
-- Worker/native/OCR/CV bundles are embedded into `VerifierApp.exe` and extracted on first launch.
+- Worker bundle sidecar: `artifacts/publish/win-x64/VerifierWorker_bundle.zip`
+- CUDA sidecars: `artifacts/publish/win-x64/cuda/*.dll`
+- OCR/CV bundles and manifest are embedded into `VerifierApp.exe`; worker bundle and CUDA sidecars are staged next to it and extracted on first launch.
 - Release publish does not include `.pdb` files.
 
 ## Worker smoke
 
-Quick smoke for bundled OCR/CV submodules:
+Bundled-first smoke for the staged worker/OCR/CV runtime:
 
 ```powershell
-.\scripts\smoke_worker.ps1 -Locale EN -Resolution 1080p
+.\scripts\smoke_worker.ps1
 ```
 
-Optional snapshot-based smoke:
+Optional source-mode smoke against an explicit OCR checkout:
 
 ```powershell
-.\scripts\smoke_worker.ps1 -Locale RU -Resolution 1440p -CvPrecheckFrame "D:\shots\precheck.png" -CvInrunFrame "D:\shots\inrun.png" -UidImage "D:\shots\uid.png" -AgentIcons @("D:\shots\agent1.png","D:\shots\agent2.png","D:\shots\agent3.png")
+.\scripts\smoke_worker.ps1 -Mode Source -OcrRoot "D:\Inter-Knot Arena\Inter-Knot Arena OCR_Scan"
 ```
+
+The smoke gate now uses committed fixtures and asserts:
+
+- `health` / `health.details`
+- strict `ocr.scan` on a real bundled fixture
+- `ocr.inspectEquipmentOverview` for an occupied weapon-only layout
+- `ocr.inspectEquipmentOverview` for an empty `CORE AVAILABLE` layout
+- OCR bundle provenance from `bundle.manifest.json`
 
 Headless live OCR smoke against a running game window:
 

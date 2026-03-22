@@ -16,11 +16,11 @@
 - DPAPI token persistence.
 
 4. `VerifierApp.WorkerHost`
-- named pipe JSON-RPC client
+- named pipe line-delimited JSON client
 - worker process lifecycle
 - native bridge P/Invoke.
 
-5. `worker/VerifierWorker.exe` (Python)
+5. `worker/VerifierWorker` runtime bundle (Python onedir)
 - methods: `health`, `ocr.scan`, `cv.precheck`, `cv.inrun`.
 
 6. `native/ika_native.dll` (C++)
@@ -34,7 +34,7 @@
 2. Open browser authorize URL.
 3. Receive loopback callback.
 4. Exchange callback code to access/refresh tokens.
-5. Extract bundled worker/native assets from `VerifierApp.exe` into `%LOCALAPPDATA%`.
+5. Extract bundled worker/native assets from `VerifierApp.exe` plus sidecar worker/CUDA payloads into `%LOCALAPPDATA%`.
 6. Run roster scan -> import payload.
 7. For matches, request verifier session and submit precheck/in-run evidence with HMAC signature.
 

@@ -1,13 +1,17 @@
-# PyInstaller spec for VerifierWorker.exe
+# PyInstaller spec for VerifierWorker onedir bundle
 
 block_cipher = None
+
+from PyInstaller.utils.hooks import collect_submodules
+
+onnxruntime_hiddenimports = collect_submodules('onnxruntime')
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['win32file', 'win32pipe', 'dxcam'],
+    hiddenimports=['win32file', 'win32pipe', 'dxcam', *onnxruntime_hiddenimports],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -21,10 +25,8 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='VerifierWorker',
     debug=False,
     bootloader_ignore_signals=False,
@@ -38,4 +40,14 @@ exe = EXE(
     target_arch='x86_64',
     codesign_identity=None,
     entitlements_file=None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='VerifierWorker',
 )

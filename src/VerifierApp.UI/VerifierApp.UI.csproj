@@ -19,9 +19,6 @@
     <ProjectReference Include="..\\VerifierApp.WorkerHost\\VerifierApp.WorkerHost.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Bundled\\VerifierWorker.exe" Condition="Exists('Bundled\\VerifierWorker.exe')">
-      <LogicalName>Bundled/VerifierWorker.exe</LogicalName>
-    </EmbeddedResource>
     <EmbeddedResource Include="Bundled\\ika_native.dll" Condition="Exists('Bundled\\ika_native.dll')">
       <LogicalName>Bundled/ika_native.dll</LogicalName>
     </EmbeddedResource>
@@ -34,6 +31,18 @@
     <EmbeddedResource Include="Bundled\\bundle.manifest.json" Condition="Exists('Bundled\\bundle.manifest.json')">
       <LogicalName>Bundled/bundle.manifest.json</LogicalName>
     </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Bundled\\VerifierWorker_bundle.zip" Condition="Exists('Bundled\\VerifierWorker_bundle.zip')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>VerifierWorker_bundle.zip</TargetPath>
+    </Content>
+    <Content Include="Bundled\\cuda\\*.dll" Condition="Exists('Bundled\\cuda')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>cuda\\%(Filename)%(Extension)</TargetPath>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\\app-icon.ico" />

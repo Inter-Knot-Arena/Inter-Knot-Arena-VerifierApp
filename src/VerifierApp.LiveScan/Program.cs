@@ -251,8 +251,7 @@ internal static class Program
 
         var workerExe = ResolveRequiredFile(
             Environment.GetEnvironmentVariable("IKA_WORKER_EXE_PATH"),
-            Path.Combine(repoRoot, "worker", "dist", "VerifierWorker.exe"),
-            Path.Combine(repoRoot, "src", "VerifierApp.UI", "Bundled", "VerifierWorker.exe")
+            Path.Combine(repoRoot, "worker", "dist", "VerifierWorker", "VerifierWorker.exe")
         );
         return new WorkerLaunch(workerExe, null, null);
     }

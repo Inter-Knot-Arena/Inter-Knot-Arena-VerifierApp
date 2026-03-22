@@ -2,13 +2,83 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 from typing import Any, Dict, Tuple
 
 import win32file
 import win32pipe
 
-from detectors import inspect_equipment_overview, run_inrun, run_ocr_scan, run_precheck
+_DLL_DIRECTORY_HANDLES: list[Any] = []
+
+
+def _prepend_runtime_dependency_dirs() -> None:
+    candidate_dirs: list[Path] = []
+
+    frozen_root = getattr(sys, "_MEIPASS", "")
+    if frozen_root:
+        frozen_path = Path(str(frozen_root))
+        candidate_dirs.extend(
+            [
+                frozen_path,
+                frozen_path / "torch" / "lib",
+                frozen_path / "onnxruntime" / "capi",
+            ]
+        )
+
+    executable_path = Path(sys.executable).resolve()
+    venv_root = executable_path.parents[1] if len(executable_path.parents) >= 2 else executable_path.parent
+    bundle_root_env = os.environ.get("IKA_BUNDLE_ROOT", "").strip()
+    if bundle_root_env:
+        bundle_root = Path(bundle_root_env)
+        candidate_dirs.append(bundle_root / "cuda")
+    candidate_dirs.extend(
+        [
+            executable_path.parent / "cuda",
+            executable_path.parent.parent / "cuda",
+            executable_path.parent / "_internal" / "torch" / "lib",
+            executable_path.parent / "_internal" / "onnxruntime" / "capi",
+            venv_root / "Lib" / "site-packages" / "torch" / "lib",
+            venv_root / "Lib" / "site-packages" / "onnxruntime" / "capi",
+        ]
+    )
+
+    existing_path = os.environ.get("PATH", "")
+    current_entries = {
+        entry.strip().lower()
+        for entry in existing_path.split(os.pathsep)
+        if entry.strip()
+    }
+    prepended: list[str] = []
+    for directory in candidate_dirs:
+        if not directory.exists():
+            continue
+        normalized = str(directory.resolve())
+        if hasattr(os, "add_dll_directory"):
+            try:
+                _DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(normalized))
+            except OSError:
+                pass
+        if normalized.lower() in current_entries:
+            continue
+        prepended.append(normalized)
+        current_entries.add(normalized.lower())
+
+    if prepended:
+        os.environ["PATH"] = os.pathsep.join(prepended + ([existing_path] if existing_path else []))
+
+
+_prepend_runtime_dependency_dirs()
+
+from detectors import (
+    get_worker_health_details,
+    inspect_equipment_overview,
+    run_inrun,
+    run_ocr_scan,
+    run_precheck,
+    worker_healthcheck,
+)
 
 
 def read_line(pipe: int) -> str | None:
@@ -33,7 +103,9 @@ def write_line(pipe: int, payload: Dict[str, Any]) -> None:
 
 def dispatch(method: str, payload: Dict[str, Any]) -> Any:
     if method == "health":
-        return True
+        return worker_healthcheck()
+    if method == "health.details":
+        return get_worker_health_details()
     if method == "ocr.scan":
         return run_ocr_scan(payload)
     if method == "ocr.inspectEquipmentOverview":

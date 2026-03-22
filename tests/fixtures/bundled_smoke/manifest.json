@@ -1,0 +1,53 @@
+{
+  "strictScan": {
+    "locale": "EN",
+    "resolution": "1440p",
+    "expectedUid": "1503066100",
+    "minimumAgentCount": 2,
+    "requiredLowConfReasons": [
+      "equipment_low_confidence"
+    ],
+    "requiredCapabilities": {
+      "agentIdsFromPixels": true,
+      "rawRosterCaptureAvailable": true
+    },
+    "requiredFieldSources": {
+      "uid": "uid_widget_winrt_ocr",
+      "capture": "runtime_roster_screen"
+    },
+    "payload": {
+      "sessionId": "bundled-smoke-strict",
+      "regionHint": "OTHER",
+      "inputLockActive": true,
+      "fullSync": false,
+      "anchors": {
+        "profile": true,
+        "agents": true,
+        "equipment": true
+      },
+      "uidImagePath": "strict/uid_widget.png",
+      "screenCaptures": [
+        {
+          "role": "roster",
+          "path": "strict/roster_page_0.png",
+          "screenAlias": "fixture_page_0",
+          "pageIndex": 0
+        }
+      ]
+    }
+  },
+  "equipment": {
+    "weaponOnlyEquipped": {
+      "path": "equipment/weapon_only_equipped.png",
+      "expectWeaponPresent": true,
+      "expectAllDiscsEmpty": true,
+      "expectNoLowConfReasons": true
+    },
+    "emptyCoreAvailable": {
+      "path": "equipment/empty_core_available.png",
+      "expectWeaponPresent": false,
+      "expectAllDiscsEmpty": true,
+      "expectNoLowConfReasons": true
+    }
+  }
+}
