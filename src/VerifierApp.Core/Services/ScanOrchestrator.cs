@@ -1003,11 +1003,16 @@ public sealed class ScanOrchestrator
 
         if (string.Equals(mode, "soft", StringComparison.OrdinalIgnoreCase))
         {
-            if (!lowConfReasons.Contains("soft_input_lock_fallback", StringComparer.OrdinalIgnoreCase))
+            if (_nativeBridge.SoftInputLockWasFallback &&
+                !lowConfReasons.Contains("soft_input_lock_fallback", StringComparer.OrdinalIgnoreCase))
             {
                 lowConfReasons.Add("soft_input_lock_fallback");
             }
             scanMeta = AppendScanMeta(scanMeta, "verifier_soft_input_lock");
+            if (_nativeBridge.SoftInputLockWasFallback)
+            {
+                scanMeta = AppendScanMeta(scanMeta, "verifier_soft_input_lock_fallback");
+            }
         }
         else if (string.Equals(mode, "hard", StringComparison.OrdinalIgnoreCase))
         {

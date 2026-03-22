@@ -15,6 +15,7 @@ public sealed class NativeBridge : INativeBridge
     private const int TokenElevationClass = 20;
     private bool _hardInputLockActive;
     private bool _softInputLockActive;
+    private bool _softInputLockWasFallback;
 
     public string CurrentInputLockMode =>
         _hardInputLockActive
@@ -22,6 +23,8 @@ public sealed class NativeBridge : INativeBridge
             : _softInputLockActive
                 ? "soft"
                 : "none";
+
+    public bool SoftInputLockWasFallback => _softInputLockWasFallback;
 
     public GameWindowStatus InspectGameWindowStatus()
     {
@@ -99,6 +102,7 @@ public sealed class NativeBridge : INativeBridge
     {
         _hardInputLockActive = false;
         _softInputLockActive = false;
+        _softInputLockWasFallback = false;
 
         if (!InspectGameWindowStatus().CanInjectInput)
         {
@@ -123,6 +127,7 @@ public sealed class NativeBridge : INativeBridge
         }
 
         _softInputLockActive = true;
+        _softInputLockWasFallback = true;
         return true;
     }
 
@@ -135,6 +140,7 @@ public sealed class NativeBridge : INativeBridge
 
         _hardInputLockActive = false;
         _softInputLockActive = false;
+        _softInputLockWasFallback = false;
     }
 
     public bool ExecuteScanScript(string script, int stepDelayMs)

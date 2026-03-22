@@ -60,6 +60,7 @@ public interface IWorkerClient
 public interface INativeBridge
 {
     string CurrentInputLockMode { get; }
+    bool SoftInputLockWasFallback { get; }
     GameWindowStatus InspectGameWindowStatus();
     bool TryFocusGameWindow();
     bool TryLockInput(bool preferSoft = false);
