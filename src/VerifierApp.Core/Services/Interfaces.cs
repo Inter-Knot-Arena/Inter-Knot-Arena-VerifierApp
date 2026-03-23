@@ -1,3 +1,4 @@
+using System.Text.Json;
 using VerifierApp.Core.Models;
 
 namespace VerifierApp.Core.Services;
@@ -55,6 +56,7 @@ public interface IWorkerClient
     );
 
     Task<bool> HealthAsync(CancellationToken ct);
+    Task<JsonElement> HealthDetailsAsync(CancellationToken ct);
 }
 
 public interface INativeBridge

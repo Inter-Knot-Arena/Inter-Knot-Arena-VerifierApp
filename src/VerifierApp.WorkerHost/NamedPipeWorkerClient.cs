@@ -30,6 +30,9 @@ public sealed class NamedPipeWorkerClient : IWorkerClient, IAsyncDisposable
     public Task<bool> HealthAsync(CancellationToken ct) =>
         SendAsync<bool>("health", new { }, ct);
 
+    public Task<JsonElement> HealthDetailsAsync(CancellationToken ct) =>
+        SendAsync<JsonElement>("health.details", new { }, ct);
+
     public Task<RosterScanResult> RunRosterScanAsync(RosterScanCommand command, CancellationToken ct) =>
         SendAsync<RosterScanResult>("ocr.scan", command, ct);
 
@@ -147,7 +150,7 @@ public sealed class NamedPipeWorkerClient : IWorkerClient, IAsyncDisposable
     private static int ResolveRequestTimeoutMs(string method) =>
         method switch
         {
-            "health" => ReadPositiveIntFromEnvironment("IKA_WORKER_HEALTH_TIMEOUT_MS", 10_000),
+            "health" => ReadPositiveIntFromEnvironment("IKA_WORKER_HEALTH_TIMEOUT_MS", 30_000),
             "ocr.inspectEquipmentOverview" => ReadPositiveIntFromEnvironment("IKA_WORKER_EQUIPMENT_TIMEOUT_MS", 15_000),
             "ocr.scan" => ReadPositiveIntFromEnvironment("IKA_WORKER_SCAN_TIMEOUT_MS", 60_000),
             _ => ReadPositiveIntFromEnvironment("IKA_WORKER_REQUEST_TIMEOUT_MS", 30_000),

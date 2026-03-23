@@ -44,7 +44,11 @@ internal static class Program
                     bundleSidecarRoot
                 );
                 nativeDll = bundledAssets.NativeDllPath;
-                workerLaunch = new WorkerLaunch(bundledAssets.WorkerExePath, null, null);
+                workerLaunch = new WorkerLaunch(
+                    bundledAssets.WorkerExePath,
+                    null,
+                    bundledAssets.CudaRoot
+                );
                 ocrRoot = bundledAssets.OcrScanRoot;
                 cvRoot = bundledAssets.CvRoot;
             }
@@ -111,6 +115,10 @@ internal static class Program
             {
                 throw new InvalidOperationException("Worker health probe failed.");
             }
+            var workerHealthDetails = await worker.HealthDetailsAsync(cts.Token);
+            Console.Error.WriteLine(
+                $"[live-scan] workerHealthDetails={JsonSerializer.Serialize(workerHealthDetails, JsonOptions)}"
+            );
 
             var orchestrator = new ScanOrchestrator(worker, new NativeBridge());
             var result = await orchestrator.CaptureRosterScanAsync(

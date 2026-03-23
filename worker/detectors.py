@@ -22,6 +22,34 @@ _DXCAM_CAMERA = None
 _BOOTSTRAP_EXPLICIT = False
 _BOOTSTRAP_CANDIDATES: list[str] = []
 _BOOTSTRAP_EXISTING: list[str] = []
+_DLL_DIRECTORY_HANDLES: list[Any] = []
+
+
+def _register_dll_directories() -> None:
+    add_dll_directory = getattr(os, "add_dll_directory", None)
+    if add_dll_directory is None:
+        return
+
+    candidates: list[Path] = []
+    bundle_root = os.getenv("IKA_BUNDLE_ROOT", "").strip()
+    if bundle_root:
+        candidates.append(Path(bundle_root).resolve() / "cuda")
+
+    executable_dir = Path(sys.executable).resolve().parent
+    candidates.append(executable_dir.parent / "cuda")
+    candidates.append(executable_dir / "cuda")
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate).lower()
+        if key in seen or not candidate.is_dir():
+            continue
+        seen.add(key)
+        try:
+            handle = add_dll_directory(str(candidate))
+        except OSError:
+            continue
+        _DLL_DIRECTORY_HANDLES.append(handle)
 
 
 def _candidate_roots() -> list[Path]:
@@ -87,6 +115,7 @@ def _bootstrap_paths() -> None:
                 sys.path.insert(0, path)
 
 
+_register_dll_directories()
 _bootstrap_paths()
 
 _DEFAULT_PRECHECK_REGION: dict[str, tuple[int, int, int, int]] = {
@@ -113,6 +142,10 @@ def _load_ocr_runtime():
     return scan_fn, failure_cls
 
 
+def _load_ocr_module():
+    return importlib.import_module("scanner")
+
+
 def _load_ocr_equipment_inspector():
     module = importlib.import_module("scanner")
     return getattr(module, "inspect_equipment_capture")
@@ -133,12 +166,47 @@ def _module_origin(module_name: str) -> str | None:
 
 
 def get_worker_health_details() -> Dict[str, Any]:
-    scan_roster, scan_failure_cls = _load_ocr_runtime()
+    module = _load_ocr_module()
+    scan_roster = getattr(module, "scan_roster")
+    scan_failure_cls = getattr(module, "ScanFailure")
     inspect_equipment = _load_ocr_equipment_inspector()
     if not callable(scan_roster):
         raise RuntimeError("OCR runtime contract invalid: scan_roster is not callable.")
     if not callable(inspect_equipment):
         raise RuntimeError("OCR runtime contract invalid: inspect_equipment_capture is not callable.")
+
+    model_probes: Dict[str, Dict[str, Any]] = {}
+    registry = getattr(module, "ModelRegistry", None)
+    if registry is not None:
+        probe_specs = (
+            ("uid", "has_uid_model", "uid_classifier"),
+            ("agent", "has_agent_model", "agent_classifier"),
+            ("disk", "has_disk_model", "disk_classifier"),
+        )
+        for model_name, has_name, load_name in probe_specs:
+            has_model = getattr(registry, has_name, None)
+            load_model = getattr(registry, load_name, None)
+            if not callable(has_model) or not callable(load_model):
+                continue
+            if not has_model():
+                model_probes[model_name] = {"available": False}
+                continue
+            try:
+                classifier = load_model()
+                session = getattr(classifier, "session", None)
+                providers = list(session.get_providers()) if session is not None else []
+                model_probes[model_name] = {
+                    "available": True,
+                    "providers": providers,
+                    "cudaActive": "CUDAExecutionProvider" in providers,
+                }
+            except Exception as exc:
+                model_probes[model_name] = {
+                    "available": True,
+                    "error": str(exc),
+                    "cudaActive": False,
+                }
+
     return {
         "ok": True,
         "bootstrap": {
@@ -150,6 +218,7 @@ def get_worker_health_details() -> Dict[str, Any]:
             "scannerModulePath": _module_origin("scanner"),
             "scanFailureType": getattr(scan_failure_cls, "__name__", str(scan_failure_cls)),
             "equipmentInspectorAvailable": True,
+            "modelProbes": model_probes,
         },
     }
 

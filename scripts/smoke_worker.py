@@ -304,6 +304,17 @@ def main() -> int:
             bool(ocr_runtime.get("equipmentInspectorAvailable")),
             "Worker health.details reported no equipment inspector.",
         )
+        model_probes = ocr_runtime.get("modelProbes") or {}
+        for model_name in ("uid", "agent", "disk"):
+            probe = model_probes.get(model_name)
+            assert_condition(
+                isinstance(probe, dict) and probe.get("available") is True,
+                f"Bundled smoke expected OCR model probe '{model_name}' to be available.",
+            )
+            assert_condition(
+                probe.get("cudaActive") is True,
+                f"Bundled smoke expected OCR model probe '{model_name}' to use CUDA. Probe: {probe}",
+            )
 
         if args.mode == "Bundled":
             expected_ocr_root = str(bundle_info["ocr_root"])

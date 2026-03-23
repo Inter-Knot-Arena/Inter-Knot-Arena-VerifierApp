@@ -524,6 +524,7 @@ public partial class MainWindow : Window
 
         _workerLauncher.Start(
             _bundledAssets.WorkerExePath,
+            pathPrependDirectory: _bundledAssets.CudaRoot,
             bundleRoot: _bundledAssets.RootPath,
             ocrRoot: _bundledAssets.OcrScanRoot,
             cvRoot: _bundledAssets.CvRoot

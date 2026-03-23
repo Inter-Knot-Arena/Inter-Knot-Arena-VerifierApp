@@ -7,6 +7,7 @@ namespace VerifierApp.WorkerHost;
 
 public sealed record BundledAssetPaths(
     string RootPath,
+    string CudaRoot,
     string WorkerExePath,
     string NativeDllPath,
     string OcrScanRoot,
@@ -23,11 +24,10 @@ public static class BundledAssetManager
 
     public static BundledAssetPaths EnsureExtracted(Assembly resourceAssembly, string? sidecarRootOverride = null)
     {
-        var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var appVersion = resourceAssembly.GetName().Version?.ToString() ?? "dev";
-        var root = Path.Combine(baseDir, "InterKnotArena", "VerifierApp", "bundled", appVersion);
-        Directory.CreateDirectory(root);
         var sidecarRoot = ResolveSidecarRoot(sidecarRootOverride);
+        var root = ResolveExtractionRoot(sidecarRootOverride, sidecarRoot, appVersion);
+        Directory.CreateDirectory(root);
 
         var manifestPath = ResolveAssetPath(
             resourceAssembly,
@@ -69,13 +69,15 @@ public static class BundledAssetManager
         );
         foreach (var fileName in manifest.CudaRuntimeFiles)
         {
-            ResolveAssetPath(
+            var outputPath = Path.Combine(root, "cuda", fileName);
+            var resolvedPath = ResolveAssetPath(
                 resourceAssembly,
                 $"Bundled/cuda/{fileName}",
-                Path.Combine(root, "cuda", fileName),
+                outputPath,
                 Path.Combine(sidecarRoot, "cuda", fileName),
                 hashes.GetValueOrDefault(fileName)
             );
+            MaterializeAsset(outputPath, resolvedPath);
         }
 
         var workerRoot = Path.Combine(root, "worker");
@@ -89,10 +91,26 @@ public static class BundledAssetManager
         }
         var ocrRoot = Path.Combine(root, "ocr_scan");
         var cvRoot = Path.Combine(root, "cv");
+        var cudaRoot = Path.Combine(root, "cuda");
+        if (!string.IsNullOrWhiteSpace(sidecarRootOverride))
+        {
+            MirrorCudaRuntimeIntoWorker(cudaRoot, workerRoot, manifest.CudaRuntimeFiles);
+        }
         EnsureArchiveExtracted(ocrBundlePath, ocrRoot, hashes.GetValueOrDefault("ocr_scan_bundle.zip"));
         EnsureArchiveExtracted(cvBundlePath, cvRoot, hashes.GetValueOrDefault("cv_bundle.zip"));
 
-        return new BundledAssetPaths(root, workerPath, nativePath, ocrRoot, cvRoot);
+        return new BundledAssetPaths(root, cudaRoot, workerPath, nativePath, ocrRoot, cvRoot);
+    }
+
+    private static string ResolveExtractionRoot(string? sidecarRootOverride, string sidecarRoot, string appVersion)
+    {
+        if (!string.IsNullOrWhiteSpace(sidecarRootOverride))
+        {
+            return Path.Combine(sidecarRoot, "_bundled_runtime", appVersion);
+        }
+
+        var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return Path.Combine(baseDir, "InterKnotArena", "VerifierApp", "bundled", appVersion);
     }
 
     private static string ResolveSidecarRoot(string? sidecarRootOverride)
@@ -237,6 +255,59 @@ public static class BundledAssetManager
         var digest = SHA256.HashData(stream);
         var actual = Convert.ToHexStringLower(digest);
         return string.Equals(actual, expectedHash.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void MaterializeAsset(string outputPath, string resolvedPath)
+    {
+        if (string.Equals(outputPath, resolvedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var outputDirectory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            Directory.CreateDirectory(outputDirectory);
+        }
+
+        File.Copy(resolvedPath, outputPath, overwrite: true);
+    }
+
+    private static void MirrorCudaRuntimeIntoWorker(string cudaRoot, string workerRoot, IEnumerable<string> fileNames)
+    {
+        if (!Directory.Exists(cudaRoot) || !Directory.Exists(workerRoot))
+        {
+            return;
+        }
+
+        foreach (var fileName in fileNames)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                continue;
+            }
+
+            var sourcePath = Path.Combine(cudaRoot, fileName);
+            if (!File.Exists(sourcePath))
+            {
+                continue;
+            }
+
+            var destinationPath = Path.Combine(workerRoot, fileName);
+            if (File.Exists(destinationPath))
+            {
+                var sourceInfo = new FileInfo(sourcePath);
+                var destinationInfo = new FileInfo(destinationPath);
+                if (sourceInfo.Length == destinationInfo.Length)
+                {
+                    continue;
+                }
+
+                File.Delete(destinationPath);
+            }
+
+            File.Copy(sourcePath, destinationPath, overwrite: true);
+        }
     }
 
     private sealed record BundleManifestData(
