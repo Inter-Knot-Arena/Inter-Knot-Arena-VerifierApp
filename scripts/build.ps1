@@ -21,13 +21,18 @@ function Invoke-ExternalStep {
 $root = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $root
 $artifactRoot = Join-Path $root "artifacts\\publish\\$Runtime"
+$liveScanPublishRoot = Join-Path $root "artifacts\\publish\\_live_scan\\$Runtime"
+$liveScanProjectPath = Join-Path $root "src\\VerifierApp.LiveScan\\VerifierApp.LiveScan.csproj"
 $nativeSourceDir = Join-Path $root "native\\ika_native"
 $nativeBuildDir = Join-Path $root "native\\ika_native\\build\\release"
 $workerDir = Join-Path $root "worker"
-$bundleDir = Join-Path $root "src\\VerifierApp.UI\\Bundled"
-$bundleCudaDir = Join-Path $bundleDir "cuda"
-$workerDistDir = Join-Path $workerDir "dist\\VerifierWorker"
-$workerBundlePath = Join-Path $bundleDir "VerifierWorker_bundle.zip"
+$bundleStageDir = Join-Path $root ("artifacts\\bundle_stage\\" + [Guid]::NewGuid().ToString("N"))
+$bundleCudaDir = Join-Path $bundleStageDir "cuda"
+$workerPyInstallerRoot = Join-Path $root ("artifacts\\worker_pyinstaller\\" + [Guid]::NewGuid().ToString("N"))
+$workerDistRoot = Join-Path $workerPyInstallerRoot "dist"
+$workerDistDir = Join-Path $workerDistRoot "VerifierWorker"
+$workerWorkDir = Join-Path $workerPyInstallerRoot "build"
+$workerBundlePath = Join-Path $bundleStageDir "VerifierWorker_bundle.zip"
 $workerPythonExe = Join-Path $workerDir ".venv\\Scripts\\python.exe"
 $workerPyInstallerExe = Join-Path $workerDir ".venv\\Scripts\\pyinstaller.exe"
 $nativeDllPathCandidates = @(
@@ -35,13 +40,20 @@ $nativeDllPathCandidates = @(
     (Join-Path $nativeBuildDir "$Configuration\\ika_native.dll"),
     (Join-Path $nativeBuildDir "Release\\ika_native.dll")
 )
-$ocrBundlePath = Join-Path $bundleDir "ocr_scan_bundle.zip"
-$cvBundlePath = Join-Path $bundleDir "cv_bundle.zip"
-$bundleManifestPath = Join-Path $bundleDir "bundle.manifest.json"
+$ocrBundlePath = Join-Path $bundleStageDir "ocr_scan_bundle.zip"
+$cvBundlePath = Join-Path $bundleStageDir "cv_bundle.zip"
+$bundleManifestPath = Join-Path $bundleStageDir "bundle.manifest.json"
 $inVsDevShell = -not [string]::IsNullOrWhiteSpace($env:VSCMD_VER)
 $cmakeGenerator = if ($inVsDevShell) { "Ninja" } else { "Visual Studio 18 2026" }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+try {
+    dotnet build-server shutdown | Out-Null
+}
+catch {
+    Write-Host "    Warning: dotnet build-server shutdown failed; continuing"
+}
 
 function New-BundleArchive {
     param(
@@ -249,10 +261,115 @@ function Get-BundleSourceMetadata {
     }
 }
 
-function Resolve-CudaRuntimeSourceDir {
+function Get-FileSha256 {
+    param(
+        [string]$Path,
+        [int]$Attempts = 20,
+        [int]$DelayMs = 500
+    )
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            try {
+                $sha256 = [System.Security.Cryptography.SHA256]::Create()
+                try {
+                    $hashBytes = $sha256.ComputeHash($stream)
+                }
+                finally {
+                    $sha256.Dispose()
+                }
+                return ([System.BitConverter]::ToString($hashBytes) -replace "-", "").ToLowerInvariant()
+            }
+            finally {
+                $stream.Dispose()
+            }
+        }
+        catch {
+            $lastError = $_
+            if ($attempt -lt $Attempts) {
+                Start-Sleep -Milliseconds $DelayMs
+            }
+        }
+    }
+
+    if ($null -ne $lastError) {
+        throw $lastError
+    }
+
+    throw "Could not compute SHA256 for file: $Path"
+}
+
+function Remove-PathWithRetry {
+    param(
+        [string]$Path,
+        [int]$Attempts = 40,
+        [int]$DelayMs = 500
+    )
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            Remove-Item $Path -Recurse -Force -ErrorAction Stop
+            return
+        }
+        catch {
+            $lastError = $_
+            if (-not (Test-Path $Path)) {
+                return
+            }
+            if ($attempt -lt $Attempts) {
+                Start-Sleep -Milliseconds $DelayMs
+            }
+        }
+    }
+
+    if ($null -ne $lastError) {
+        throw $lastError
+    }
+}
+
+function Wait-DotnetPublishCompletion {
+    param(
+        [string]$ProjectMarker,
+        [string]$ExpectedFile,
+        [int]$TimeoutSeconds = 900
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $publishProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -eq "dotnet.exe" -and
+            $_.CommandLine -like "* publish *" -and
+            $_.CommandLine -like "*$ProjectMarker*"
+        })
+        $artifactReady = (Test-Path $ExpectedFile) -and ((Get-Item $ExpectedFile).Length -gt 0)
+        if ($publishProcesses.Count -eq 0 -and $artifactReady) {
+            return
+        }
+
+        Start-Sleep -Seconds 2
+    }
+
+    throw "Timed out waiting for dotnet publish completion for $ProjectMarker"
+}
+
+function Resolve-CudaRuntimeSourceDirs {
+    $resolved = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+
     $explicitDir = $env:IKA_CUDA_DLL_DIR
-    if (-not [string]::IsNullOrWhiteSpace($explicitDir) -and (Test-Path $explicitDir)) {
-        return (Resolve-Path $explicitDir).Path
+    if (-not [string]::IsNullOrWhiteSpace($explicitDir)) {
+        $explicitCandidates = $explicitDir -split [regex]::Escape([string][System.IO.Path]::PathSeparator)
+        foreach ($candidate in $explicitCandidates) {
+            if (Test-Path $candidate) {
+                [void]$resolved.Add((Resolve-Path $candidate).Path)
+            }
+        }
     }
 
     $probeScript = @'
@@ -265,14 +382,18 @@ except Exception:
     raise SystemExit(1)
 
 lib_dir = pathlib.Path(torch.__file__).resolve().parent / "lib"
-markers = list(lib_dir.glob("cublasLt64_*.dll"))
+markers = list(lib_dir.glob("cublasLt64_*.dll")) + list(lib_dir.glob("cufft64_*.dll"))
 if lib_dir.is_dir() and markers:
     print(lib_dir)
     raise SystemExit(0)
 raise SystemExit(1)
 '@
 
-    foreach ($candidate in @(@("py", "-3.12"), @("python", ""))) {
+    foreach ($candidate in @(
+        @((Join-Path $env:LOCALAPPDATA "Programs\\Python\\Python312\\python.exe"), ""),
+        @("py", "-3.12"),
+        @("python", "")
+    )) {
         $executable = $candidate[0]
         $prefixArgument = $candidate[1]
         $arguments = @()
@@ -282,9 +403,11 @@ raise SystemExit(1)
         try {
             $raw = @($probeScript) | & $executable @arguments -
             if ($LASTEXITCODE -eq 0) {
-                $resolved = ($raw -join "").Trim()
-                if (-not [string]::IsNullOrWhiteSpace($resolved) -and (Test-Path $resolved)) {
-                    return (Resolve-Path $resolved).Path
+                $probeResults = @($raw) | ForEach-Object { $_.ToString().Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+                foreach ($result in $probeResults) {
+                    if (Test-Path $result) {
+                        [void]$resolved.Add((Resolve-Path $result).Path)
+                    }
                 }
             }
         }
@@ -293,12 +416,16 @@ raise SystemExit(1)
         }
     }
 
-    throw "Could not locate a CUDA runtime DLL directory. Set IKA_CUDA_DLL_DIR to a torch\\lib folder with CUDA DLLs."
+    if ($resolved.Count -eq 0) {
+        throw "Could not locate CUDA runtime DLL directories. Set IKA_CUDA_DLL_DIR to one or more torch\\lib folders with CUDA DLLs."
+    }
+
+    return @($resolved)
 }
 
 function Copy-CudaRuntimeDlls {
     param(
-        [string]$SourceDir,
+        [string[]]$SourceDirs,
         [string]$DestinationDir
     )
 
@@ -316,21 +443,32 @@ function Copy-CudaRuntimeDlls {
         "zlibwapi.dll"
     )
 
-    if (Test-Path $DestinationDir) {
-        Remove-Item $DestinationDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
     New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
+    Get-ChildItem -Path $DestinationDir -Filter *.dll -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
     $copied = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($pattern in $patterns) {
-        foreach ($file in Get-ChildItem -Path $SourceDir -Filter $pattern -File -ErrorAction SilentlyContinue) {
-            if ($copied.Add($file.Name)) {
-                Copy-Item $file.FullName -Destination (Join-Path $DestinationDir $file.Name) -Force
+    foreach ($sourceDir in $SourceDirs) {
+        foreach ($pattern in $patterns) {
+            foreach ($file in Get-ChildItem -Path $sourceDir -Filter $pattern -File -ErrorAction SilentlyContinue) {
+                if ($copied.Add($file.Name)) {
+                    Copy-Item $file.FullName -Destination (Join-Path $DestinationDir $file.Name) -Force
+                }
             }
         }
     }
 
-    $required = @("cublasLt64_12.dll", "cudart64_12.dll", "cudnn64_9.dll")
+    $required = @(
+        "cublasLt64_12.dll",
+        "cudart64_12.dll",
+        "cudnn64_9.dll",
+        "cufft64_11.dll",
+        "curand64_10.dll",
+        "cusolver64_11.dll",
+        "cusparse64_12.dll",
+        "nvJitLink_120_0.dll",
+        "nvrtc64_120_0.dll",
+        "zlibwapi.dll"
+    )
     foreach ($name in $required) {
         if (-not (Test-Path (Join-Path $DestinationDir $name))) {
             throw "CUDA runtime bundle is missing required dependency: $name"
@@ -399,22 +537,23 @@ Invoke-ExternalStep -Name "Pip pyinstaller" -Action {
     & $workerPythonExe -m pip install pyinstaller
 }
 Invoke-ExternalStep -Name "PyInstaller build" -Action {
-    & $workerPyInstallerExe VerifierWorker.spec --noconfirm --clean
+    & $workerPyInstallerExe VerifierWorker.spec --noconfirm --clean --distpath $workerDistRoot --workpath $workerWorkDir
 }
 Pop-Location
 
 Write-Host "==> Staging bundled assets into UI project"
-New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
+New-Item -ItemType Directory -Force -Path $bundleStageDir | Out-Null
 if (Test-Path $workerBundlePath) {
-    Remove-Item $workerBundlePath -Force
+    Remove-PathWithRetry -Path $workerBundlePath
 }
-if (Test-Path (Join-Path $bundleDir "VerifierWorker.exe")) {
-    Remove-Item (Join-Path $bundleDir "VerifierWorker.exe") -Force -ErrorAction SilentlyContinue
+if (Test-Path (Join-Path $bundleStageDir "VerifierWorker.exe")) {
+    Remove-PathWithRetry -Path (Join-Path $bundleStageDir "VerifierWorker.exe")
 }
 New-ArchiveFromDirectory -SourceDir $workerDistDir -DestinationZip $workerBundlePath
-Copy-Item $nativeDllPath -Destination (Join-Path $bundleDir "ika_native.dll") -Force
-$cudaRuntimeSourceDir = Resolve-CudaRuntimeSourceDir
-$cudaRuntimeFiles = Copy-CudaRuntimeDlls -SourceDir $cudaRuntimeSourceDir -DestinationDir $bundleCudaDir
+Copy-Item $nativeDllPath -Destination (Join-Path $bundleStageDir "ika_native.dll") -Force
+$cudaRuntimeSourceDirs = Resolve-CudaRuntimeSourceDirs
+Write-Host "    Using CUDA runtime sources: $($cudaRuntimeSourceDirs -join ', ')"
+$cudaRuntimeFiles = Copy-CudaRuntimeDlls -SourceDirs $cudaRuntimeSourceDirs -DestinationDir $bundleCudaDir
 Write-Host "==> Building OCR/CV bundle archives"
 Test-OcrBundleSourceContract -PythonExe $workerPythonExe -SourceDir $ocrRepoDir
 New-BundleArchive -SourceDir $ocrRepoDir -DestinationZip $ocrBundlePath
@@ -437,18 +576,22 @@ $manifest = @{
             -ExternalRoot (Join-Path $root "external\\CV")
     }
     sha256 = @{
-        "VerifierWorker_bundle.zip" = (Get-FileHash -Algorithm SHA256 $workerBundlePath).Hash.ToLowerInvariant()
-        "ika_native.dll" = (Get-FileHash -Algorithm SHA256 (Join-Path $bundleDir "ika_native.dll")).Hash.ToLowerInvariant()
-        "ocr_scan_bundle.zip" = (Get-FileHash -Algorithm SHA256 $ocrBundlePath).Hash.ToLowerInvariant()
-        "cv_bundle.zip" = (Get-FileHash -Algorithm SHA256 $cvBundlePath).Hash.ToLowerInvariant()
+        "VerifierWorker_bundle.zip" = Get-FileSha256 -Path $workerBundlePath
+        "ika_native.dll" = Get-FileSha256 -Path (Join-Path $bundleStageDir "ika_native.dll")
+        "ocr_scan_bundle.zip" = Get-FileSha256 -Path $ocrBundlePath
+        "cv_bundle.zip" = Get-FileSha256 -Path $cvBundlePath
     }
 }
 foreach ($file in $cudaRuntimeFiles) {
-    $manifest.sha256[$file.Name] = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+    $manifest.sha256[$file.Name] = Get-FileSha256 -Path $file.FullName
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $bundleManifestPath -Encoding UTF8
 
 Write-Host "==> Publishing single-file WPF host (VerifierApp.exe)"
+if (Test-Path $artifactRoot) {
+    Remove-Item $artifactRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
 Invoke-ExternalStep -Name "dotnet publish" -Action {
     dotnet publish (Join-Path $root "src\\VerifierApp.UI\\VerifierApp.UI.csproj") `
         -c $Configuration `
@@ -458,16 +601,46 @@ Invoke-ExternalStep -Name "dotnet publish" -Action {
         -p:IncludeNativeLibrariesForSelfExtract=true `
         -p:DebugType=None `
         -p:DebugSymbols=false `
+        "-p:BundledAssetRoot=$bundleStageDir" `
         "-p:ApiOrigin=$ApiOrigin" `
         -o $artifactRoot
 }
+Wait-DotnetPublishCompletion -ProjectMarker "VerifierApp.UI.csproj" -ExpectedFile (Join-Path $artifactRoot "VerifierApp.exe")
 
-Copy-Item $workerBundlePath -Destination (Join-Path $artifactRoot "VerifierWorker_bundle.zip") -Force
+$publishSidecarMap = @{
+    "VerifierWorker_bundle.zip" = $workerBundlePath
+    "bundle.manifest.json" = $bundleManifestPath
+    "ocr_scan_bundle.zip" = $ocrBundlePath
+    "cv_bundle.zip" = $cvBundlePath
+    "ika_native.dll" = (Join-Path $bundleStageDir "ika_native.dll")
+}
+foreach ($entry in $publishSidecarMap.GetEnumerator()) {
+    Copy-Item $entry.Value -Destination (Join-Path $artifactRoot $entry.Key) -Force
+}
 $publishCudaDir = Join-Path $artifactRoot "cuda"
 if (Test-Path $publishCudaDir) {
-    Remove-Item $publishCudaDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-PathWithRetry -Path $publishCudaDir
 }
 Copy-Item $bundleCudaDir -Destination $publishCudaDir -Recurse -Force
+
+Write-Host "==> Publishing packaged live-scan tool (VerifierApp.LiveScan.exe)"
+if (Test-Path $liveScanPublishRoot) {
+    Remove-Item $liveScanPublishRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+New-Item -ItemType Directory -Force -Path $liveScanPublishRoot | Out-Null
+Invoke-ExternalStep -Name "dotnet publish VerifierApp.LiveScan" -Action {
+    dotnet publish $liveScanProjectPath `
+        -c $Configuration `
+        -r $Runtime `
+        --self-contained true `
+        -p:PublishSingleFile=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true `
+        -p:DebugType=None `
+        -p:DebugSymbols=false `
+        -o $liveScanPublishRoot
+}
+Wait-DotnetPublishCompletion -ProjectMarker "VerifierApp.LiveScan.csproj" -ExpectedFile (Join-Path $liveScanPublishRoot "VerifierApp.LiveScan.exe")
+Copy-Item (Join-Path $liveScanPublishRoot "VerifierApp.LiveScan.exe") -Destination (Join-Path $artifactRoot "VerifierApp.LiveScan.exe") -Force
 
 Write-Host "Build output: $artifactRoot"
 Write-Host "Primary artifact: $(Join-Path $artifactRoot 'VerifierApp.exe')"

@@ -21,18 +21,19 @@ public static class BundledAssetManager
     private const string CvBundleResourceName = "Bundled/cv_bundle.zip";
     private const string ManifestResourceName = "Bundled/bundle.manifest.json";
 
-    public static BundledAssetPaths EnsureExtracted(Assembly resourceAssembly)
+    public static BundledAssetPaths EnsureExtracted(Assembly resourceAssembly, string? sidecarRootOverride = null)
     {
         var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var appVersion = resourceAssembly.GetName().Version?.ToString() ?? "dev";
         var root = Path.Combine(baseDir, "InterKnotArena", "VerifierApp", "bundled", appVersion);
         Directory.CreateDirectory(root);
+        var sidecarRoot = ResolveSidecarRoot(sidecarRootOverride);
 
         var manifestPath = ResolveAssetPath(
             resourceAssembly,
             ManifestResourceName,
             Path.Combine(root, "bundle.manifest.json"),
-            Path.Combine(AppContext.BaseDirectory, "bundle.manifest.json"),
+            Path.Combine(sidecarRoot, "bundle.manifest.json"),
             expectedHash: null
         );
         var manifest = LoadBundleManifest(manifestPath);
@@ -42,28 +43,28 @@ public static class BundledAssetManager
             resourceAssembly,
             WorkerBundleResourceName,
             Path.Combine(root, "VerifierWorker_bundle.zip"),
-            Path.Combine(AppContext.BaseDirectory, "VerifierWorker_bundle.zip"),
+            Path.Combine(sidecarRoot, "VerifierWorker_bundle.zip"),
             hashes.GetValueOrDefault("VerifierWorker_bundle.zip")
         );
         var nativePath = ResolveAssetPath(
             resourceAssembly,
             NativeResourceName,
             Path.Combine(root, "ika_native.dll"),
-            Path.Combine(AppContext.BaseDirectory, "ika_native.dll"),
+            Path.Combine(sidecarRoot, "ika_native.dll"),
             hashes.GetValueOrDefault("ika_native.dll")
         );
         var ocrBundlePath = ResolveAssetPath(
             resourceAssembly,
             OcrBundleResourceName,
             Path.Combine(root, "ocr_scan_bundle.zip"),
-            Path.Combine(AppContext.BaseDirectory, "ocr_scan_bundle.zip"),
+            Path.Combine(sidecarRoot, "ocr_scan_bundle.zip"),
             hashes.GetValueOrDefault("ocr_scan_bundle.zip")
         );
         var cvBundlePath = ResolveAssetPath(
             resourceAssembly,
             CvBundleResourceName,
             Path.Combine(root, "cv_bundle.zip"),
-            Path.Combine(AppContext.BaseDirectory, "cv_bundle.zip"),
+            Path.Combine(sidecarRoot, "cv_bundle.zip"),
             hashes.GetValueOrDefault("cv_bundle.zip")
         );
         foreach (var fileName in manifest.CudaRuntimeFiles)
@@ -72,7 +73,7 @@ public static class BundledAssetManager
                 resourceAssembly,
                 $"Bundled/cuda/{fileName}",
                 Path.Combine(root, "cuda", fileName),
-                Path.Combine(AppContext.BaseDirectory, "cuda", fileName),
+                Path.Combine(sidecarRoot, "cuda", fileName),
                 hashes.GetValueOrDefault(fileName)
             );
         }
@@ -92,6 +93,22 @@ public static class BundledAssetManager
         EnsureArchiveExtracted(cvBundlePath, cvRoot, hashes.GetValueOrDefault("cv_bundle.zip"));
 
         return new BundledAssetPaths(root, workerPath, nativePath, ocrRoot, cvRoot);
+    }
+
+    private static string ResolveSidecarRoot(string? sidecarRootOverride)
+    {
+        if (string.IsNullOrWhiteSpace(sidecarRootOverride))
+        {
+            return AppContext.BaseDirectory;
+        }
+
+        var fullPath = Path.GetFullPath(sidecarRootOverride);
+        if (!Directory.Exists(fullPath))
+        {
+            throw new DirectoryNotFoundException($"Bundled sidecar root does not exist: '{fullPath}'.");
+        }
+
+        return fullPath;
     }
 
     private static BundleManifestData LoadBundleManifest(string manifestPath)

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text.Json;
 using VerifierApp.Core.Services;
 using VerifierApp.WorkerHost;
@@ -25,30 +26,56 @@ internal static class Program
 
         try
         {
-            var repoRoot = ResolveRepoRoot(options.RepoRoot);
             EnsureProcessEnvironmentDefault("IKA_ALLOW_SOFT_INPUT_LOCK", "1");
             EnsureProcessEnvironmentDefault("IKA_DEFAULT_OCR_CAPTURE_PLAN", "VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA");
             EnsureProcessEnvironmentDefault("IKA_KEY_SCRIPT_BACKEND", "native");
-            var nativeDll = ResolveNativeDll(repoRoot);
+            var bundleSidecarRoot = ResolveBundledSidecarRoot(options.BundleRoot, options.RepoRoot);
+            var repoRoot = bundleSidecarRoot is null ? ResolveRepoRoot(options.RepoRoot) : null;
+            BundledAssetPaths? bundledAssets = null;
+            var nativeDll = string.Empty;
+            WorkerLaunch workerLaunch;
+            string? ocrRoot;
+            string? cvRoot;
+
+            if (!string.IsNullOrWhiteSpace(bundleSidecarRoot))
+            {
+                bundledAssets = BundledAssetManager.EnsureExtracted(
+                    Assembly.GetExecutingAssembly(),
+                    bundleSidecarRoot
+                );
+                nativeDll = bundledAssets.NativeDllPath;
+                workerLaunch = new WorkerLaunch(bundledAssets.WorkerExePath, null, null);
+                ocrRoot = bundledAssets.OcrScanRoot;
+                cvRoot = bundledAssets.CvRoot;
+            }
+            else
+            {
+                nativeDll = ResolveNativeDll(repoRoot!);
+                workerLaunch = ResolveWorkerLaunch(repoRoot!);
+                ocrRoot = ResolveOptionalDirectory(
+                    Environment.GetEnvironmentVariable("IKA_OCR_SCAN_ROOT"),
+                    Path.Combine(Path.GetDirectoryName(repoRoot!) ?? repoRoot!, "Inter-Knot Arena OCR_Scan"),
+                    Path.Combine(repoRoot!, "external", "OCR_Scan")
+                );
+                cvRoot = ResolveOptionalDirectory(
+                    Environment.GetEnvironmentVariable("IKA_CV_ROOT"),
+                    Path.Combine(Path.GetDirectoryName(repoRoot!) ?? repoRoot!, "Inter-Knot Arena CV"),
+                    Path.Combine(repoRoot!, "external", "CV")
+                );
+            }
+
             PrependDirectoryToPath(Path.GetDirectoryName(nativeDll));
+            NativeLibraryBootstrap.Initialize(nativeDll);
 
             if (!string.IsNullOrWhiteSpace(options.ProbeScript))
             {
                 return await RunProbeAsync(options, cts.Token);
             }
 
-            var workerLaunch = ResolveWorkerLaunch(repoRoot);
-            var ocrRoot = ResolveOptionalDirectory(
-                Environment.GetEnvironmentVariable("IKA_OCR_SCAN_ROOT"),
-                Path.Combine(Path.GetDirectoryName(repoRoot) ?? repoRoot, "Inter-Knot Arena OCR_Scan"),
-                Path.Combine(repoRoot, "external", "OCR_Scan")
-            );
-            var cvRoot = ResolveOptionalDirectory(
-                Environment.GetEnvironmentVariable("IKA_CV_ROOT"),
-                Path.Combine(Path.GetDirectoryName(repoRoot) ?? repoRoot, "Inter-Knot Arena CV"),
-                Path.Combine(repoRoot, "external", "CV")
-            );
-            Console.Error.WriteLine($"[live-scan] repoRoot={repoRoot}");
+            Console.Error.WriteLine($"[live-scan] mode={(bundledAssets is null ? "repo" : "bundled")}");
+            Console.Error.WriteLine($"[live-scan] repoRoot={repoRoot ?? "<null>"}");
+            Console.Error.WriteLine($"[live-scan] bundleSidecarRoot={bundleSidecarRoot ?? "<null>"}");
+            Console.Error.WriteLine($"[live-scan] bundleExtractRoot={bundledAssets?.RootPath ?? "<null>"}");
             Console.Error.WriteLine($"[live-scan] ocrRoot={ocrRoot ?? "<null>"}");
             Console.Error.WriteLine($"[live-scan] cvRoot={cvRoot ?? "<null>"}");
             Console.Error.WriteLine($"[live-scan] pipeName={options.PipeName}");
@@ -69,6 +96,7 @@ internal static class Program
                 pipeName: options.PipeName,
                 extraArguments: workerLaunch.ExtraArguments,
                 pathPrependDirectory: workerLaunch.PathPrependDirectory,
+                bundleRoot: bundledAssets?.RootPath,
                 ocrRoot: ocrRoot,
                 cvRoot: cvRoot
             );
@@ -229,6 +257,60 @@ internal static class Program
         }
 
         throw new InvalidOperationException("Could not resolve VerifierApp repository root.");
+    }
+
+    private static string? ResolveBundledSidecarRoot(string? explicitPath, string? repoRoot)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitPath))
+        {
+            var fullPath = Path.GetFullPath(explicitPath);
+            if (!Directory.Exists(fullPath))
+            {
+                throw new InvalidOperationException($"Bundled sidecar root does not exist: {fullPath}");
+            }
+
+            return fullPath;
+        }
+
+        var envRoot = Environment.GetEnvironmentVariable("IKA_BUNDLE_SIDECAR_ROOT");
+        if (string.IsNullOrWhiteSpace(envRoot))
+        {
+            envRoot = Environment.GetEnvironmentVariable("IKA_BUNDLE_ROOT");
+        }
+        if (!string.IsNullOrWhiteSpace(envRoot))
+        {
+            var fullPath = Path.GetFullPath(envRoot);
+            if (!Directory.Exists(fullPath))
+            {
+                throw new InvalidOperationException($"Bundled sidecar root does not exist: {fullPath}");
+            }
+
+            return fullPath;
+        }
+
+        if (!string.IsNullOrWhiteSpace(repoRoot))
+        {
+            return null;
+        }
+
+        return LooksLikeBundledSidecarRoot(AppContext.BaseDirectory)
+            ? AppContext.BaseDirectory
+            : null;
+    }
+
+    private static bool LooksLikeBundledSidecarRoot(string candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate) || !Directory.Exists(candidate))
+        {
+            return false;
+        }
+
+        return File.Exists(Path.Combine(candidate, "bundle.manifest.json")) &&
+               File.Exists(Path.Combine(candidate, "VerifierWorker_bundle.zip")) &&
+               File.Exists(Path.Combine(candidate, "ocr_scan_bundle.zip")) &&
+               File.Exists(Path.Combine(candidate, "cv_bundle.zip")) &&
+               File.Exists(Path.Combine(candidate, "ika_native.dll")) &&
+               Directory.Exists(Path.Combine(candidate, "cuda"));
     }
 
     private static WorkerLaunch ResolveWorkerLaunch(string repoRoot)
@@ -540,6 +622,7 @@ internal static class Program
         int WorkerStartupDelayMs,
         string? OutputPath,
         string? RepoRoot,
+        string? BundleRoot,
         string? ProbeScript,
         string? ProbeOutputDirectory,
         int ProbeStepDelayMs,
@@ -557,6 +640,7 @@ internal static class Program
             var workerStartupDelayMs = 1_500;
             string? outputPath = null;
             string? repoRoot = null;
+            string? bundleRoot = null;
             string? probeScript = null;
             string? probeOutputDirectory = null;
             var probeStepDelayMs = 120;
@@ -594,6 +678,9 @@ internal static class Program
                     case "--repo-root":
                         repoRoot = RequireValue(args, ref index, arg).Trim();
                         break;
+                    case "--bundle-root":
+                        bundleRoot = RequireValue(args, ref index, arg).Trim();
+                        break;
                     case "--probe-script":
                         probeScript = RequireValue(args, ref index, arg);
                         break;
@@ -626,6 +713,7 @@ internal static class Program
                 WorkerStartupDelayMs: workerStartupDelayMs,
                 OutputPath: outputPath,
                 RepoRoot: repoRoot,
+                BundleRoot: bundleRoot,
                 ProbeScript: probeScript,
                 ProbeOutputDirectory: probeOutputDirectory,
                 ProbeStepDelayMs: probeStepDelayMs,
@@ -666,7 +754,7 @@ internal static class Program
         {
             Console.WriteLine(
                 "Usage: VerifierApp.LiveScan [--region EU] [--locale RU] [--resolution 1080p] [--full-sync] " +
-                "[--out path] [--repo-root path] [--pipe-name name] [--connect-timeout-ms 15000] " +
+                "[--out path] [--repo-root path] [--bundle-root path] [--pipe-name name] [--connect-timeout-ms 15000] " +
                 "[--worker-startup-delay-ms 1500] [--probe-script \"RIGHT,ENTER\"] " +
                 "[--probe-out-dir path] [--probe-step-delay-ms 120] [--probe-post-delay-ms 500]"
             );

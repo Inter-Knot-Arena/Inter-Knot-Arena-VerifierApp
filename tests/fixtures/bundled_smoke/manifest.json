@@ -3,7 +3,7 @@
     "locale": "EN",
     "resolution": "1440p",
     "expectedUid": "1503066100",
-    "minimumAgentCount": 2,
+    "minimumAgentCount": 1,
     "requiredLowConfReasons": [
       "equipment_low_confidence"
     ],

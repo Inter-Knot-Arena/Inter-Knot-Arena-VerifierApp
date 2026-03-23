@@ -11,6 +11,7 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <SelfContained>true</SelfContained>
+    <BundledAssetRoot Condition="'$(BundledAssetRoot)' == ''">Bundled</BundledAssetRoot>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\\VerifierApp.Core\\VerifierApp.Core.csproj" />
@@ -19,28 +20,30 @@
     <ProjectReference Include="..\\VerifierApp.WorkerHost\\VerifierApp.WorkerHost.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Bundled\\ika_native.dll" Condition="Exists('Bundled\\ika_native.dll')">
+    <EmbeddedResource Include="$(BundledAssetRoot)\\ika_native.dll" Condition="Exists('$(BundledAssetRoot)\\ika_native.dll')">
       <LogicalName>Bundled/ika_native.dll</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="Bundled\\ocr_scan_bundle.zip" Condition="Exists('Bundled\\ocr_scan_bundle.zip')">
+    <EmbeddedResource Include="$(BundledAssetRoot)\\ocr_scan_bundle.zip" Condition="Exists('$(BundledAssetRoot)\\ocr_scan_bundle.zip')">
       <LogicalName>Bundled/ocr_scan_bundle.zip</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="Bundled\\cv_bundle.zip" Condition="Exists('Bundled\\cv_bundle.zip')">
+    <EmbeddedResource Include="$(BundledAssetRoot)\\cv_bundle.zip" Condition="Exists('$(BundledAssetRoot)\\cv_bundle.zip')">
       <LogicalName>Bundled/cv_bundle.zip</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="Bundled\\bundle.manifest.json" Condition="Exists('Bundled\\bundle.manifest.json')">
+    <EmbeddedResource Include="$(BundledAssetRoot)\\bundle.manifest.json" Condition="Exists('$(BundledAssetRoot)\\bundle.manifest.json')">
       <LogicalName>Bundled/bundle.manifest.json</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Bundled\\VerifierWorker_bundle.zip" Condition="Exists('Bundled\\VerifierWorker_bundle.zip')">
+    <Content Include="$(BundledAssetRoot)\\VerifierWorker_bundle.zip" Condition="Exists('$(BundledAssetRoot)\\VerifierWorker_bundle.zip')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       <TargetPath>VerifierWorker_bundle.zip</TargetPath>
     </Content>
-    <Content Include="Bundled\\cuda\\*.dll" Condition="Exists('Bundled\\cuda')">
+    <Content Include="$(BundledAssetRoot)\\cuda\\*.dll" Condition="Exists('$(BundledAssetRoot)\\cuda')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       <TargetPath>cuda\\%(Filename)%(Extension)</TargetPath>
     </Content>
   </ItemGroup>
