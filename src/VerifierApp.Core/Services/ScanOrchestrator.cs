@@ -10,6 +10,7 @@ public sealed class ScanOrchestrator
     private readonly INativeBridge _nativeBridge;
     private const string DefaultLiveEntryScript = "ESC,ESC";
     private static readonly object TraceLock = new();
+    private bool _gameFocusKnownGood;
 
     public ScanOrchestrator(
         IVerifierApiClient apiClient,
@@ -39,11 +40,15 @@ public sealed class ScanOrchestrator
         CancellationToken ct
     )
     {
+        _gameFocusKnownGood = false;
         await EnsureGameFocusedAsync(ct);
 
         try
         {
             var sessionId = Guid.NewGuid().ToString("N");
+            AppendTrace(
+                $"scan-runtime orchestrator-mvid={typeof(ScanOrchestrator).Module.ModuleVersionId:N} rosterProbePolicy=selection_only focusCache=true"
+            );
             var scanScript = Environment.GetEnvironmentVariable("IKA_SCAN_SCRIPT");
             if (string.IsNullOrWhiteSpace(scanScript))
             {
@@ -551,6 +556,10 @@ public sealed class ScanOrchestrator
             ? await InspectUnavailableFullRosterSlotsAsync(sessionId, tempRoot, pageIndex, ct)
             : new HashSet<int>();
         var loggedUnavailableAgentSlots = new HashSet<int>();
+        var rosterScreenKnownGood = mode == RuntimeScreenCaptureMode.FullRosterPage && pageIndex is > 0;
+        AppendTrace(
+            $"capture {sessionId}: policy mode={mode} steps={plan.Count} rosterProbePolicy=selection_only rosterFastPath={rosterScreenKnownGood.ToString().ToLowerInvariant()} focusCache=true"
+        );
 
         var captures = new List<ScreenCaptureInput>();
         EquipmentOverviewInspectionResult? currentEquipmentOverview = null;
@@ -562,24 +571,36 @@ public sealed class ScanOrchestrator
             var step = plan[index];
             if (mode == RuntimeScreenCaptureMode.FullRosterPage && RequiresRosterScreen(step))
             {
-                AppendTrace(
-                    $"capture {sessionId}: step {index + 1} verify-roster-before-step alias={step.ScreenAlias ?? string.Empty}"
-                );
-                await EnsureVisibleSliceRosterEntryAsync(ct);
-                var selectionSurface = await InspectVisibleSliceEntrySurfaceAsync(index + 1000, ct);
-                AppendTrace(
-                    $"capture {sessionId}: step {index + 1} roster-step-surface home={selectionSurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={selectionSurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
-                );
-                if (!selectionSurface.LooksLikeRosterScreen)
+                if (rosterScreenKnownGood)
                 {
-                    throw new InvalidOperationException(
-                        $"Scan aborted: roster step {index + 1} is not on the roster screen."
+                    AppendTrace(
+                        $"capture {sessionId}: step {index + 1} roster-fast-path alias={step.ScreenAlias ?? string.Empty}"
                     );
+                }
+                else
+                {
+                    AppendTrace(
+                        $"capture {sessionId}: step {index + 1} verify-roster-before-step alias={step.ScreenAlias ?? string.Empty}"
+                    );
+                    await EnsureVisibleSliceRosterEntryAsync(ct);
+                    var selectionSurface = await InspectVisibleSliceEntrySurfaceAsync(index + 1000, ct);
+                    AppendTrace(
+                        $"capture {sessionId}: step {index + 1} roster-step-surface home={selectionSurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={selectionSurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
+                    );
+                    if (!selectionSurface.LooksLikeRosterScreen)
+                    {
+                        throw new InvalidOperationException(
+                            $"Scan aborted: roster step {index + 1} is not on the roster screen."
+                        );
+                    }
+
+                    rosterScreenKnownGood = true;
                 }
             }
             if (step.RequiresVisibleSliceEntry)
             {
                 await EnsureVisibleSliceRosterEntryAsync(ct);
+                rosterScreenKnownGood = true;
             }
             if (ShouldSkipUnavailableAgentSlotStep(step, unavailableAgentSlots))
             {
@@ -637,6 +658,7 @@ public sealed class ScanOrchestrator
                     $"extra capture step {index + 1} ({step.Role})",
                 ct
             );
+            rosterScreenKnownGood = UpdateRosterScreenStateKnownGood(step, rosterScreenKnownGood);
             AppendTrace(
                 $"capture {sessionId}: step {index + 1} script-complete role={step.Role} alias={step.ScreenAlias ?? string.Empty}"
             );
@@ -850,6 +872,7 @@ public sealed class ScanOrchestrator
 
     private async Task EnsureGameFocusedAsync(
         CancellationToken ct,
+        bool force = false,
         string failureMessage = "Scan aborted: game window could not be focused."
     )
     {
@@ -862,7 +885,13 @@ public sealed class ScanOrchestrator
             var status = _nativeBridge.InspectGameWindowStatus();
             if (!status.CanInjectInput)
             {
+                _gameFocusKnownGood = false;
                 throw new InvalidOperationException(BuildGameWindowFailureMessage(status));
+            }
+
+            if (!force && _gameFocusKnownGood)
+            {
+                return;
             }
 
             if (_nativeBridge.TryFocusGameWindow())
@@ -872,6 +901,7 @@ public sealed class ScanOrchestrator
                 {
                     await Task.Delay(refocusDelayMs, ct);
                 }
+                _gameFocusKnownGood = true;
                 return;
             }
 
@@ -881,6 +911,7 @@ public sealed class ScanOrchestrator
             }
         }
 
+        _gameFocusKnownGood = false;
         throw new InvalidOperationException(failureMessage);
     }
 
@@ -1056,7 +1087,7 @@ public sealed class ScanOrchestrator
                 $"script-start context={failureContext} attempt={attempt}/{maxAttempts} expectFrameChange={expectFrameChange} script={script}"
             );
             AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=ensure-focus-start");
-            await EnsureGameFocusedAsync(ct);
+            await EnsureGameFocusedAsync(ct, force: attempt > 1);
             AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=ensure-focus-complete");
             AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=before-hash-start");
             var beforeHash = expectFrameChange ? NormalizeFrameHash(_nativeBridge.CaptureFrameHash()) : string.Empty;
@@ -1067,6 +1098,7 @@ public sealed class ScanOrchestrator
             AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=execute-start");
             if (!_nativeBridge.ExecuteScanScript(script, stepDelayMs))
             {
+                _gameFocusKnownGood = false;
                 AppendTrace(
                     $"script-failed context={failureContext} attempt={attempt}/{maxAttempts} stage=execute"
                 );
@@ -1102,12 +1134,14 @@ public sealed class ScanOrchestrator
                 string.IsNullOrWhiteSpace(afterHash) ||
                 !string.Equals(beforeHash, afterHash, StringComparison.OrdinalIgnoreCase))
             {
+                _gameFocusKnownGood = true;
                 AppendTrace(
                     $"script-success context={failureContext} attempt={attempt}/{maxAttempts}"
                 );
                 return;
             }
 
+            _gameFocusKnownGood = false;
             AppendTrace(
                 $"script-failed context={failureContext} attempt={attempt}/{maxAttempts} stage=frame-unchanged"
             );
@@ -1147,6 +1181,7 @@ public sealed class ScanOrchestrator
         AppendTrace($"script-try-stage script={script} stage=execute-start");
         if (!_nativeBridge.ExecuteScanScript(script, stepDelayMs))
         {
+            _gameFocusKnownGood = false;
             AppendTrace($"script-try-failed script={script} stage=execute");
             return false;
         }
@@ -1159,6 +1194,7 @@ public sealed class ScanOrchestrator
 
         if (!expectFrameChange)
         {
+            _gameFocusKnownGood = true;
             return true;
         }
 
@@ -1167,11 +1203,13 @@ public sealed class ScanOrchestrator
         AppendTrace($"script-try-stage script={script} stage=after-hash-complete empty={string.IsNullOrWhiteSpace(afterHash)}");
         if (string.IsNullOrWhiteSpace(beforeHash) || string.IsNullOrWhiteSpace(afterHash))
         {
+            _gameFocusKnownGood = false;
             AppendTrace($"script-try-failed script={script} stage=hash-empty");
             return false;
         }
 
         var changed = !string.Equals(beforeHash, afterHash, StringComparison.OrdinalIgnoreCase);
+        _gameFocusKnownGood = changed;
         AppendTrace($"script-try-complete script={script} changed={changed}");
         return changed;
     }
@@ -1199,11 +1237,44 @@ public sealed class ScanOrchestrator
         return IsRosterSelectionStep(step);
     }
 
+    private static bool UpdateRosterScreenStateKnownGood(RuntimeScreenCaptureStep step, bool rosterScreenKnownGood)
+    {
+        if (RestoresRosterScreen(step))
+        {
+            return true;
+        }
+
+        if (LeavesRosterScreen(step))
+        {
+            return false;
+        }
+
+        return rosterScreenKnownGood;
+    }
+
     private static bool IsRosterSelectionStep(RuntimeScreenCaptureStep step)
     {
         return string.IsNullOrWhiteSpace(step.Role) &&
                !string.IsNullOrWhiteSpace(step.ScreenAlias) &&
                step.ScreenAlias.StartsWith("select_agent_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool RestoresRosterScreen(RuntimeScreenCaptureStep step)
+    {
+        return string.IsNullOrWhiteSpace(step.Role) &&
+               !string.IsNullOrWhiteSpace(step.ScreenAlias) &&
+               step.ScreenAlias.StartsWith("return_to_agent_grid_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LeavesRosterScreen(RuntimeScreenCaptureStep step)
+    {
+        if (IsRosterSelectionStep(step))
+        {
+            return true;
+        }
+
+        return string.IsNullOrWhiteSpace(step.Role) &&
+               string.Equals(step.ScreenAlias, "exit_agent_grid", StringComparison.OrdinalIgnoreCase);
     }
 
     private RosterScanResult AttachInputLockMetadata(RosterScanResult scan)
@@ -1868,7 +1939,7 @@ public sealed class ScanOrchestrator
         {
             ct.ThrowIfCancellationRequested();
             DeleteFileQuietly(outputPath);
-            await EnsureGameFocusedAsync(ct);
+            await EnsureGameFocusedAsync(ct, force: captureAttempt > 1);
             if (TryCaptureRuntimePng(outputPath))
             {
                 for (var readyAttempt = 0; readyAttempt < fileReadyAttempts; readyAttempt++)
@@ -1879,6 +1950,7 @@ public sealed class ScanOrchestrator
                         var length = new FileInfo(outputPath).Length;
                         if (length > 0 && !LooksLikeBlackRuntimeFrame(outputPath))
                         {
+                            _gameFocusKnownGood = true;
                             return true;
                         }
                     }
@@ -1893,6 +1965,7 @@ public sealed class ScanOrchestrator
             AppendTrace(
                 $"runtime-capture retry attempt={captureAttempt}/{captureAttempts} file={Path.GetFileName(outputPath)}"
             );
+            _gameFocusKnownGood = false;
 
             if (captureAttempt < captureAttempts && retryDelayMs > 0)
             {
@@ -1901,6 +1974,7 @@ public sealed class ScanOrchestrator
         }
 
         DeleteFileQuietly(outputPath);
+        _gameFocusKnownGood = false;
         return false;
     }
 
