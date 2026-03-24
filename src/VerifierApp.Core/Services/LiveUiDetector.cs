@@ -16,6 +16,21 @@ internal static class LiveUiDetector
     private const double SearchRightFraction = 0.77;
     private const double SearchBottomFraction = 0.98;
     private const double MatchThreshold = 0.30;
+    private const double BaseStatsTabLeftFraction = 0.53;
+    private const double BaseStatsTabTopFraction = 0.88;
+    private const double BaseStatsTabWidthFraction = 0.17;
+    private const double BaseStatsTabHeightFraction = 0.10;
+    private const double EquipmentTabLeftFraction = 0.79;
+    private const double EquipmentTabTopFraction = 0.88;
+    private const double EquipmentTabWidthFraction = 0.17;
+    private const double EquipmentTabHeightFraction = 0.10;
+    private const byte ActiveTabHighlightMinRed = 120;
+    private const byte ActiveTabHighlightMinGreen = 115;
+    private const byte ActiveTabHighlightMaxBlue = 100;
+    private const double ActiveTabHighlightMinSaturation = 40.0;
+    private const double ActiveTabHighlightMinLuma = 100.0;
+    private const double ActiveTabHighlightMinFraction = 0.18;
+    private const double ActiveTabHighlightDominanceMargin = 0.08;
     // These boxes must stay aligned with the same top-row cards that the runtime
     // capture plan clicks via select_agent_1/2/3.
     private static readonly (int AgentSlotIndex, double X, double Y, double Width, double Height)[] VisibleRosterSlotBoxes =
@@ -169,6 +184,57 @@ internal static class LiveUiDetector
             inspection.LooksUnavailableVisualStyle || inspection.LooksUnavailableByLockBadge
         );
         return brightSlots >= 2 || (brightSlots >= 1 && unavailableSlots >= 1);
+    }
+
+    public static AgentProfileSurfaceInspection InspectAgentProfileSurface(string screenshotPath)
+    {
+        if (string.IsNullOrWhiteSpace(screenshotPath) || !File.Exists(screenshotPath))
+        {
+            return new AgentProfileSurfaceInspection(false, false, false, false, 0.0, 0.0);
+        }
+
+        var looksLikeHomeScreen = LooksLikeHomeScreen(screenshotPath);
+        var looksLikeRosterScreen = LooksLikeAgentRosterScreen(screenshotPath);
+        using var screenshot = new Bitmap(screenshotPath);
+        if (screenshot.Width < 300 || screenshot.Height < 200)
+        {
+            return new AgentProfileSurfaceInspection(looksLikeHomeScreen, looksLikeRosterScreen, false, false, 0.0, 0.0);
+        }
+
+        var baseStatsHighlightFraction = MeasureHighlightFraction(
+            screenshot,
+            FractionalRectangle(
+                screenshot,
+                BaseStatsTabLeftFraction,
+                BaseStatsTabTopFraction,
+                BaseStatsTabWidthFraction,
+                BaseStatsTabHeightFraction
+            )
+        );
+        var equipmentHighlightFraction = MeasureHighlightFraction(
+            screenshot,
+            FractionalRectangle(
+                screenshot,
+                EquipmentTabLeftFraction,
+                EquipmentTabTopFraction,
+                EquipmentTabWidthFraction,
+                EquipmentTabHeightFraction
+            )
+        );
+        var looksLikeAgentDetailScreen =
+            baseStatsHighlightFraction >= ActiveTabHighlightMinFraction &&
+            (baseStatsHighlightFraction - equipmentHighlightFraction) >= ActiveTabHighlightDominanceMargin;
+        var looksLikeEquipmentScreen =
+            equipmentHighlightFraction >= ActiveTabHighlightMinFraction &&
+            (equipmentHighlightFraction - baseStatsHighlightFraction) >= ActiveTabHighlightDominanceMargin;
+        return new AgentProfileSurfaceInspection(
+            looksLikeHomeScreen,
+            looksLikeRosterScreen,
+            looksLikeAgentDetailScreen,
+            looksLikeEquipmentScreen,
+            Math.Round(baseStatsHighlightFraction, 4),
+            Math.Round(equipmentHighlightFraction, 4)
+        );
     }
 
     private static TemplateData? LoadHomeAgentsTemplate()
@@ -492,6 +558,36 @@ internal static class LiveUiDetector
         return false;
     }
 
+    private static double MeasureHighlightFraction(Bitmap bitmap, Rectangle rect)
+    {
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return 0.0;
+        }
+
+        var highlightedPixels = 0;
+        var totalPixels = rect.Width * rect.Height;
+        for (var y = rect.Top; y < rect.Bottom; y++)
+        {
+            for (var x = rect.Left; x < rect.Right; x++)
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                var saturation = ComputeSaturation(pixel);
+                var luma = (0.299 * pixel.R) + (0.587 * pixel.G) + (0.114 * pixel.B);
+                if (pixel.R >= ActiveTabHighlightMinRed &&
+                    pixel.G >= ActiveTabHighlightMinGreen &&
+                    pixel.B <= ActiveTabHighlightMaxBlue &&
+                    saturation >= ActiveTabHighlightMinSaturation &&
+                    luma >= ActiveTabHighlightMinLuma)
+                {
+                    highlightedPixels += 1;
+                }
+            }
+        }
+
+        return totalPixels <= 0 ? 0.0 : (double)highlightedPixels / totalPixels;
+    }
+
     private static double ComputeNormalizedCorrelation(Bitmap candidate, TemplateData template)
     {
         var gray = new double[template.Width * template.Height];
@@ -569,4 +665,13 @@ internal sealed record RosterSlotInspection(
     double MeanCenterSaturation,
     double CenterColorPixelFraction,
     double MeanCenterLuma
+);
+
+internal sealed record AgentProfileSurfaceInspection(
+    bool LooksLikeHomeScreen,
+    bool LooksLikeRosterScreen,
+    bool LooksLikeAgentDetailScreen,
+    bool LooksLikeEquipmentScreen,
+    double BaseStatsHighlightFraction,
+    double EquipmentHighlightFraction
 );

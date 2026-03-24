@@ -713,19 +713,9 @@ public sealed class ScanOrchestrator
                     $"capture {sessionId}: equipment-inspection weaponPresent={(currentEquipmentOverview?.WeaponPresent?.ToString() ?? "null")} discs={(currentEquipmentOverview?.DiscSlotOccupancy?.Count ?? 0)}"
                 );
             }
-            else if (mode == RuntimeScreenCaptureMode.FullRosterPage &&
-                     string.Equals(step.Role, "agent_detail", StringComparison.OrdinalIgnoreCase))
+            if (RequiresPostCaptureSurfaceValidation(step))
             {
-                var looksLikeHomeScreen = LiveUiDetector.LooksLikeHomeScreen(outputPath);
-                AppendTrace(
-                    $"capture {sessionId}: step {index + 1} agent-detail-surface home={looksLikeHomeScreen.ToString().ToLowerInvariant()}"
-                );
-                if (looksLikeHomeScreen)
-                {
-                    throw new InvalidOperationException(
-                        $"Scan aborted: agent detail capture for slot {step.AgentSlotIndex?.ToString() ?? "unknown"} landed on the home/menu screen."
-                    );
-                }
+                ValidateCapturedSafeSurface(sessionId, index + 1, step, outputPath, currentEquipmentOverview);
             }
         }
 
@@ -829,6 +819,51 @@ public sealed class ScanOrchestrator
         catch
         {
             return null;
+        }
+    }
+
+    private static bool RequiresPostCaptureSurfaceValidation(RuntimeScreenCaptureStep step) =>
+        string.Equals(step.Role, "agent_detail", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(step.Role, "equipment", StringComparison.OrdinalIgnoreCase);
+
+    private void ValidateCapturedSafeSurface(
+        string sessionId,
+        int stepNumber,
+        RuntimeScreenCaptureStep step,
+        string outputPath,
+        EquipmentOverviewInspectionResult? equipmentOverview
+    )
+    {
+        var inspection = LiveUiDetector.InspectAgentProfileSurface(outputPath);
+        if (string.Equals(step.Role, "agent_detail", StringComparison.OrdinalIgnoreCase))
+        {
+            AppendTrace(
+                $"capture {sessionId}: step {stepNumber} agent-detail-surface home={inspection.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={inspection.LooksLikeRosterScreen.ToString().ToLowerInvariant()} detail={inspection.LooksLikeAgentDetailScreen.ToString().ToLowerInvariant()} equipment={inspection.LooksLikeEquipmentScreen.ToString().ToLowerInvariant()} baseTab={inspection.BaseStatsHighlightFraction:F4} equipTab={inspection.EquipmentHighlightFraction:F4}"
+            );
+            if (inspection.LooksLikeRosterScreen || !inspection.LooksLikeAgentDetailScreen)
+            {
+                throw new InvalidOperationException(
+                    $"Scan aborted: agent detail capture for slot {step.AgentSlotIndex?.ToString() ?? "unknown"} did not land on the expected safe detail screen."
+                );
+            }
+
+            return;
+        }
+
+        if (string.Equals(step.Role, "equipment", StringComparison.OrdinalIgnoreCase))
+        {
+            AppendTrace(
+                $"capture {sessionId}: step {stepNumber} equipment-surface home={inspection.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={inspection.LooksLikeRosterScreen.ToString().ToLowerInvariant()} detail={inspection.LooksLikeAgentDetailScreen.ToString().ToLowerInvariant()} equipment={inspection.LooksLikeEquipmentScreen.ToString().ToLowerInvariant()} baseTab={inspection.BaseStatsHighlightFraction:F4} equipTab={inspection.EquipmentHighlightFraction:F4} overview={(equipmentOverview is not null).ToString().ToLowerInvariant()}"
+            );
+            if (inspection.LooksLikeRosterScreen ||
+                inspection.LooksLikeAgentDetailScreen ||
+                !inspection.LooksLikeEquipmentScreen ||
+                equipmentOverview is null)
+            {
+                throw new InvalidOperationException(
+                    $"Scan aborted: equipment capture for slot {step.AgentSlotIndex?.ToString() ?? "unknown"} did not land on the expected safe equipment screen."
+                );
+            }
         }
     }
 
