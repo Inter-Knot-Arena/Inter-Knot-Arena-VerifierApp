@@ -146,12 +146,24 @@ internal static class Program
             );
 
             var orchestrator = new ScanOrchestrator(worker, nativeBridge);
+            var scanStopwatch = Stopwatch.StartNew();
             var result = await orchestrator.CaptureRosterScanAsync(
                 regionHint: options.Region,
                 fullSync: options.FullSync,
                 locale: options.Locale,
                 resolution: options.Resolution,
                 ct: cts.Token
+            );
+            scanStopwatch.Stop();
+            result = result with
+            {
+                ScanMeta = AppendScanMetaToken(
+                    result.ScanMeta,
+                    $"verifier_wall_ms_{Math.Round(scanStopwatch.Elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero)}"
+                )
+            };
+            Console.Error.WriteLine(
+                $"[live-scan] wallMs={scanStopwatch.Elapsed.TotalMilliseconds:F2}"
             );
 
             var json = JsonSerializer.Serialize(result, JsonOptions);
@@ -179,6 +191,23 @@ internal static class Program
             Console.Error.WriteLine(ex.Message);
             return 1;
         }
+    }
+
+    private static string AppendScanMetaToken(string existing, string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return existing;
+        }
+        if (string.IsNullOrWhiteSpace(existing))
+        {
+            return token;
+        }
+        if (existing.Contains(token, StringComparison.OrdinalIgnoreCase))
+        {
+            return existing;
+        }
+        return $"{existing}+{token}";
     }
 
     private static async Task<int> RunProbeAsync(Options options, CancellationToken ct)
