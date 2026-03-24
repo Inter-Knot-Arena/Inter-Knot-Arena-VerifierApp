@@ -624,9 +624,9 @@ public partial class MainWindow : Window
     {
         if (ResolutionComboBox.SelectedItem is ComboBoxItem item && item.Content is string value)
         {
-            return value;
+            return value.Trim().ToLowerInvariant();
         }
-        return "1080p";
+        return "auto";
     }
 
     private Uri ParseApiBaseUri()

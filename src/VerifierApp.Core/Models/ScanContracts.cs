@@ -15,7 +15,7 @@ public sealed record RosterScanCommand(
     string RegionHint,
     bool FullSync,
     string Locale = "EN",
-    string Resolution = "1080p",
+    string Resolution = "auto",
     bool InputLockActive = true,
     bool CaptureScreen = true,
     IReadOnlyList<ScreenCaptureInput>? ScreenCaptures = null

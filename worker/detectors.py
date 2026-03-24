@@ -234,9 +234,13 @@ def _safe_list(values: Any) -> list[str]:
     return [str(item).strip() for item in values if str(item).strip()]
 
 
-def _coerce_payload_resolution(payload: Dict[str, Any]) -> str:
-    resolution = str(payload.get("resolution", "1080p")).lower().strip()
-    return resolution if resolution in {"1080p", "1440p"} else "1080p"
+def _coerce_payload_resolution(payload: Dict[str, Any], *, allow_auto: bool = False) -> str:
+    resolution = str(payload.get("resolution", "")).lower().strip()
+    if resolution in {"1080p", "1440p"}:
+        return resolution
+    if allow_auto and resolution in {"", "auto"}:
+        return ""
+    return "1080p"
 
 
 def _coerce_payload_locale(payload: Dict[str, Any]) -> str:
@@ -396,7 +400,7 @@ def _build_roster_context(payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     full_sync = bool(payload.get("fullSync", False))
     region_hint = str(payload.get("regionHint", "OTHER"))
     locale = _coerce_payload_locale(payload)
-    resolution = _coerce_payload_resolution(payload)
+    resolution = _coerce_payload_resolution(payload, allow_auto=True)
 
     anchors_raw = payload.get("anchors")
     anchors = dict(anchors_raw) if isinstance(anchors_raw, dict) else {}

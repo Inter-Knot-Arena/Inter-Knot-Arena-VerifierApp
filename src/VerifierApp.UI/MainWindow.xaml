@@ -384,6 +384,7 @@
                                         </ComboBox>
                                         <TextBlock Grid.Column="2" Text="Resolution" Margin="14,0,10,0" VerticalAlignment="Center" Foreground="#D1DDF2" FontWeight="SemiBold"/>
                                         <ComboBox x:Name="ResolutionComboBox" Grid.Column="3" Width="96" SelectedIndex="0">
+                                            <ComboBoxItem Content="Auto"/>
                                             <ComboBoxItem Content="1080p"/>
                                             <ComboBoxItem Content="1440p"/>
                                         </ComboBox>

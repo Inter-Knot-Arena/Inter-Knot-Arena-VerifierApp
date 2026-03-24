@@ -709,7 +709,7 @@ internal static class Program
         {
             var region = "EU";
             var locale = "RU";
-            var resolution = "1080p";
+            var resolution = "auto";
             var fullSync = false;
             var pipeName = $"ika_verifier_worker_{Guid.NewGuid():N}";
             var connectTimeoutMs = 15_000;
@@ -829,7 +829,7 @@ internal static class Program
         private static void PrintUsage()
         {
             Console.WriteLine(
-                "Usage: VerifierApp.LiveScan [--region EU] [--locale RU] [--resolution 1080p] [--full-sync] " +
+                "Usage: VerifierApp.LiveScan [--region EU] [--locale RU] [--resolution auto|1080p|1440p] [--full-sync] " +
                 "[--out path] [--repo-root path] [--bundle-root path] [--pipe-name name] [--connect-timeout-ms 15000] " +
                 "[--worker-startup-delay-ms 1500] [--probe-script \"RIGHT,ENTER\"] " +
                 "[--probe-out-dir path] [--probe-step-delay-ms 120] [--probe-post-delay-ms 500]"
