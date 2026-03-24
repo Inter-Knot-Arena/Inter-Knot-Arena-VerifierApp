@@ -82,6 +82,14 @@ internal static class Program
             Console.Error.WriteLine($"[live-scan] bundleExtractRoot={bundledAssets?.RootPath ?? "<null>"}");
             Console.Error.WriteLine($"[live-scan] ocrRoot={ocrRoot ?? "<null>"}");
             Console.Error.WriteLine($"[live-scan] cvRoot={cvRoot ?? "<null>"}");
+            if (bundledAssets is not null)
+            {
+                var bundleManifestPath = Path.Combine(bundledAssets.RootPath, "bundle.manifest.json");
+                Console.Error.WriteLine($"[live-scan] bundleManifestPath={bundleManifestPath}");
+                Console.Error.WriteLine(
+                    $"[live-scan] bundleManifestSummary={JsonSerializer.Serialize(ReadBundleManifestSummary(bundleManifestPath), JsonOptions)}"
+                );
+            }
             Console.Error.WriteLine($"[live-scan] pipeName={options.PipeName}");
             if (!string.IsNullOrWhiteSpace(ocrRoot))
             {
@@ -235,6 +243,66 @@ internal static class Program
                 "Could not start live probe: ZenlessZoneZero is running as administrator. Start VerifierApp.LiveScan as administrator too.",
             _ => "Could not start live probe: game window is not ready for live input."
         };
+    }
+
+    private static Dictionary<string, object?> ReadBundleManifestSummary(string manifestPath)
+    {
+        var summary = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["exists"] = File.Exists(manifestPath),
+            ["path"] = manifestPath
+        };
+        if (!File.Exists(manifestPath))
+        {
+            return summary;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(manifestPath);
+            using var document = JsonDocument.Parse(stream);
+            if (document.RootElement.TryGetProperty("generatedAt", out var generatedAt))
+            {
+                summary["generatedAt"] = generatedAt.GetString();
+            }
+            if (document.RootElement.TryGetProperty("sources", out var sources) && sources.ValueKind == JsonValueKind.Object)
+            {
+                var sourceSummary = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (var property in sources.EnumerateObject())
+                {
+                    if (property.Value.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+
+                    var source = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    if (property.Value.TryGetProperty("sourceKind", out var sourceKind))
+                    {
+                        source["sourceKind"] = sourceKind.GetString();
+                    }
+                    if (property.Value.TryGetProperty("sourceDir", out var sourceDir))
+                    {
+                        source["sourceDir"] = sourceDir.GetString();
+                    }
+                    if (property.Value.TryGetProperty("branch", out var branch))
+                    {
+                        source["branch"] = branch.GetString();
+                    }
+                    if (property.Value.TryGetProperty("commit", out var commit))
+                    {
+                        source["commit"] = commit.GetString();
+                    }
+                    sourceSummary[property.Name] = source;
+                }
+                summary["sources"] = sourceSummary;
+            }
+        }
+        catch (Exception ex)
+        {
+            summary["error"] = ex.Message;
+        }
+
+        return summary;
     }
 
     private static string ResolveRepoRoot(string? explicitPath)
