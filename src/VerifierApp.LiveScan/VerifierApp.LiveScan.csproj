@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <AssemblyName>VerifierApp.LiveScan</AssemblyName>
     <RootNamespace>VerifierApp.LiveScan</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\\VerifierApp.Core\\VerifierApp.Core.csproj" />

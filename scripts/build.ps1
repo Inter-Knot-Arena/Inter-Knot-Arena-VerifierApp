@@ -640,7 +640,9 @@ Invoke-ExternalStep -Name "dotnet publish VerifierApp.LiveScan" -Action {
         -o $liveScanPublishRoot
 }
 Wait-DotnetPublishCompletion -ProjectMarker "VerifierApp.LiveScan.csproj" -ExpectedFile (Join-Path $liveScanPublishRoot "VerifierApp.LiveScan.exe")
-Copy-Item (Join-Path $liveScanPublishRoot "VerifierApp.LiveScan.exe") -Destination (Join-Path $artifactRoot "VerifierApp.LiveScan.exe") -Force
+$publishToolsRoot = Join-Path $artifactRoot "tools"
+New-Item -ItemType Directory -Force -Path $publishToolsRoot | Out-Null
+Copy-Item (Join-Path $liveScanPublishRoot "VerifierApp.LiveScan.exe") -Destination (Join-Path $publishToolsRoot "VerifierApp.LiveScan.exe") -Force
 
 Write-Host "Build output: $artifactRoot"
 Write-Host "Primary artifact: $(Join-Path $artifactRoot 'VerifierApp.exe')"

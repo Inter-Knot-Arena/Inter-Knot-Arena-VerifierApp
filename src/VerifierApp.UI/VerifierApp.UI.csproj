@@ -11,6 +11,7 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <SelfContained>true</SelfContained>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <BundledAssetRoot Condition="'$(BundledAssetRoot)' == ''">Bundled</BundledAssetRoot>
   </PropertyGroup>
   <ItemGroup>

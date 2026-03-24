@@ -248,7 +248,7 @@ internal static class RuntimeScreenCapturePlan
             AgentSlotIndex: agentSlotIndex,
             ScreenAlias: $"select_agent_{agentSlotIndex}",
             StepDelayMs: 120,
-            PostDelayMs: 900,
+            PostDelayMs: 650,
             Capture: false,
             ExpectFrameChange: true,
             RequiresVisibleSliceEntry: requiresVisibleSliceEntry
@@ -261,7 +261,7 @@ internal static class RuntimeScreenCapturePlan
             AgentSlotIndex: agentSlotIndex,
             ScreenAlias: $"agent_{agentSlotIndex}_detail",
             StepDelayMs: 120,
-            PostDelayMs: 1150,
+            PostDelayMs: 850,
             Capture: true,
             ExpectFrameChange: true,
             RequiresVisibleSliceEntry: requiresVisibleSliceEntry
@@ -276,7 +276,7 @@ internal static class RuntimeScreenCapturePlan
                 AgentSlotIndex: agentSlotIndex,
                 ScreenAlias: $"agent_{agentSlotIndex}_equipment",
                 StepDelayMs: 120,
-                PostDelayMs: 900,
+                PostDelayMs: 650,
                 Capture: true,
                 ExpectFrameChange: true
             )
@@ -288,7 +288,7 @@ internal static class RuntimeScreenCapturePlan
                 AgentSlotIndex: agentSlotIndex,
                 ScreenAlias: $"agent_{agentSlotIndex}_amplifier",
                 StepDelayMs: 120,
-                PostDelayMs: 900,
+                PostDelayMs: 650,
                 Capture: true,
                 ExpectFrameChange: true
             )
@@ -300,7 +300,7 @@ internal static class RuntimeScreenCapturePlan
                 AgentSlotIndex: agentSlotIndex,
                 ScreenAlias: $"exit_agent_{agentSlotIndex}_amplifier",
                 StepDelayMs: 120,
-                PostDelayMs: 280,
+                PostDelayMs: 220,
                 Capture: false,
                 ExpectFrameChange: true
             )
@@ -315,7 +315,7 @@ internal static class RuntimeScreenCapturePlan
                     SlotIndex: slotIndex,
                     ScreenAlias: $"agent_{agentSlotIndex}_disk_{slotIndex}",
                     StepDelayMs: 120,
-                    PostDelayMs: 950,
+                    PostDelayMs: 700,
                     Capture: true,
                     ExpectFrameChange: true
                 )
@@ -328,7 +328,7 @@ internal static class RuntimeScreenCapturePlan
                     SlotIndex: slotIndex,
                     ScreenAlias: $"exit_agent_{agentSlotIndex}_disk_{slotIndex}",
                     StepDelayMs: 120,
-                    PostDelayMs: 700,
+                    PostDelayMs: 450,
                     Capture: false,
                     ExpectFrameChange: true
                 )
@@ -346,7 +346,7 @@ internal static class RuntimeScreenCapturePlan
                 AgentSlotIndex: agentSlotIndex,
                 ScreenAlias: $"return_to_agent_grid_{agentSlotIndex}",
                 StepDelayMs: 120,
-                PostDelayMs: 380,
+                PostDelayMs: 220,
                 Capture: false,
                 ExpectFrameChange: true
             )

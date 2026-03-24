@@ -57,14 +57,14 @@ Set-Location "Inter-Knot Arena VerifierApp"
 Output:
 
 - Single-file app: `artifacts/publish/win-x64/VerifierApp.exe`
-- Packaged live-scan tool: `artifacts/publish/win-x64/VerifierApp.LiveScan.exe`
+- Packaged live-scan tool: `artifacts/publish/win-x64/tools/VerifierApp.LiveScan.exe`
 - Bundle manifest: `artifacts/publish/win-x64/bundle.manifest.json`
 - Native sidecar: `artifacts/publish/win-x64/ika_native.dll`
 - OCR bundle sidecar: `artifacts/publish/win-x64/ocr_scan_bundle.zip`
 - CV bundle sidecar: `artifacts/publish/win-x64/cv_bundle.zip`
 - Worker bundle sidecar: `artifacts/publish/win-x64/VerifierWorker_bundle.zip`
 - CUDA sidecars: `artifacts/publish/win-x64/cuda/*.dll`
-- `VerifierApp.exe` still embeds OCR/CV/native assets for desktop runtime. The publish root also stages the same bundle sidecars so `VerifierApp.LiveScan.exe` and `scripts/smoke_worker.ps1 -BundleDirectory artifacts/publish/win-x64` can validate the packaged runtime directly.
+- `VerifierApp.exe` still embeds OCR/CV/native assets for desktop runtime. The publish root also stages the same bundle sidecars so `tools/VerifierApp.LiveScan.exe` and `scripts/smoke_worker.ps1 -BundleDirectory artifacts/publish/win-x64` can validate the packaged runtime directly.
 - Release publish does not include `.pdb` files.
 
 ## Worker smoke
@@ -167,7 +167,7 @@ dotnet build .\src\VerifierApp.LiveScan\VerifierApp.LiveScan.csproj -c Release
 To validate the packaged runtime instead of the source checkout, run the published tool against the published sidecar root:
 
 ```powershell
-.\artifacts\publish\win-x64\VerifierApp.LiveScan.exe --bundle-root .\artifacts\publish\win-x64 --locale RU --resolution 1440p --out .\artifacts\live_scan\packaged_latest.json
+.\artifacts\publish\win-x64\tools\VerifierApp.LiveScan.exe --bundle-root .\artifacts\publish\win-x64 --locale RU --resolution auto --out .\artifacts\live_scan\packaged_latest.json
 ```
 
 The tool defaults to `VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA`, `IKA_ALLOW_SOFT_INPUT_LOCK=1`, `IKA_KEY_SCRIPT_BACKEND=native`, and the built-in `ESC,ESC` live normalize script for bring-up. To tune UI navigation without running OCR end-to-end, use probe mode:

@@ -151,6 +151,13 @@ internal static class LiveUiDetector
 
     public static bool LooksLikeAgentRosterScreen(string screenshotPath)
     {
+        // Home/menu can light up the top-card heuristics, but it is never a safe
+        // substitute for the actual agent roster.
+        if (LooksLikeHomeScreen(screenshotPath))
+        {
+            return false;
+        }
+
         var inspections = InspectVisibleRosterSlots(screenshotPath);
         if (inspections.Count == 0)
         {

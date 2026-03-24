@@ -70,6 +70,23 @@ internal static class Program
 
             PrependDirectoryToPath(Path.GetDirectoryName(nativeDll));
             NativeLibraryBootstrap.Initialize(nativeDll);
+            var nativeBridge = new NativeBridge();
+            var elevationOutcome = ElevationRelaunchHelper.TryRelaunchIfGameRequiresElevation(
+                nativeBridge,
+                Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? string.Empty,
+                args,
+                out var elevationError,
+                out var relaunchedExitCode,
+                waitForExit: true
+            );
+            if (elevationOutcome == ElevationRelaunchOutcome.Relaunched)
+            {
+                return relaunchedExitCode ?? 0;
+            }
+            if (elevationOutcome != ElevationRelaunchOutcome.NotNeeded)
+            {
+                throw new InvalidOperationException(elevationError ?? "Administrator relaunch failed.");
+            }
 
             if (!string.IsNullOrWhiteSpace(options.ProbeScript))
             {
@@ -128,7 +145,7 @@ internal static class Program
                 $"[live-scan] workerHealthDetails={JsonSerializer.Serialize(workerHealthDetails, JsonOptions)}"
             );
 
-            var orchestrator = new ScanOrchestrator(worker, new NativeBridge());
+            var orchestrator = new ScanOrchestrator(worker, nativeBridge);
             var result = await orchestrator.CaptureRosterScanAsync(
                 regionHint: options.Region,
                 fullSync: options.FullSync,

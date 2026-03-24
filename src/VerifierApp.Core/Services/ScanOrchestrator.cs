@@ -1,3 +1,4 @@
+using System.Drawing;
 using VerifierApp.Core.Models;
 
 namespace VerifierApp.Core.Services;
@@ -72,7 +73,7 @@ public sealed class ScanOrchestrator
                 AppendTrace(
                     $"scan-entry-surface home={entrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={entrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
                 );
-                shouldRunScanScript = !entrySurface.LooksLikeHomeScreen;
+                shouldRunScanScript = !entrySurface.LooksLikeHomeScreen && !entrySurface.LooksLikeRosterScreen;
             }
 
             if (shouldRunScanScript)
@@ -206,6 +207,15 @@ public sealed class ScanOrchestrator
         var maxPages = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_MAX_PAGES", 64);
         var maxStalledPages = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_MAX_STALLED_PAGES", 3);
         var expectedAgentCount = ReadNonNegativeIntFromEnvironment("IKA_EXPECTED_AGENT_COUNT", 20);
+        var initialPageResetSteps = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_INITIAL_PAGE_RESET_STEPS", 16);
+        var initialPageResetScript = ReadScriptFromEnvironment(
+            "IKA_FULL_SYNC_INITIAL_PAGE_RESET_SCRIPT",
+            BuildRepeatedScript("WHEEL:120", initialPageResetSteps)
+        );
+        var initialPageResetPostDelayMs = ReadNonNegativeIntFromEnvironment(
+            "IKA_FULL_SYNC_INITIAL_PAGE_RESET_POST_DELAY_MS",
+            750
+        );
         var initialUpSteps = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_INITIAL_UP_STEPS", 24);
         var initialPostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_INITIAL_POST_DELAY_MS", 400);
         var initialColumnNormalizeScript = ReadScriptFromEnvironment(
@@ -219,9 +229,20 @@ public sealed class ScanOrchestrator
         var pageNormalizeStepDelayMs = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_PAGE_NORMALIZE_STEP_DELAY_MS", 120);
         var pageNormalizePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_PAGE_NORMALIZE_POST_DELAY_MS", 220);
 
+        if (!string.IsNullOrWhiteSpace(initialPageResetScript))
+        {
+            await ExecuteGameScriptAsync(
+                initialPageResetScript,
+                pageAdvanceStepDelayMs,
+                initialPageResetPostDelayMs,
+                expectFrameChange: false,
+                failureContext: "full sync reset roster scroll before page 1",
+                ct
+            );
+        }
         if (initialUpSteps > 0)
         {
-            var resetScript = BuildRepeatedKeyScript("UP", initialUpSteps);
+            var resetScript = BuildRepeatedScript("UP", initialUpSteps);
             if (!string.IsNullOrWhiteSpace(resetScript))
             {
                 await ExecuteGameScriptAsync(
@@ -384,6 +405,7 @@ public sealed class ScanOrchestrator
                 lowConfReasons.Add("full_sync_page_advance_script_missing");
                 break;
             }
+            await EnsureVisibleSliceRosterEntryAsync(ct);
             if (!string.IsNullOrWhiteSpace(pageNormalizeScript))
             {
                 await ExecuteGameScriptAsync(
@@ -526,7 +548,7 @@ public sealed class ScanOrchestrator
 
         var tempRoot = ResolveRuntimeTempRoot("screen_captures", sessionId);
         var unavailableAgentSlots = mode == RuntimeScreenCaptureMode.FullRosterPage
-            ? InspectUnavailableFullRosterSlots(sessionId, tempRoot, pageIndex)
+            ? await InspectUnavailableFullRosterSlotsAsync(sessionId, tempRoot, pageIndex, ct)
             : new HashSet<int>();
         var loggedUnavailableAgentSlots = new HashSet<int>();
 
@@ -538,6 +560,23 @@ public sealed class ScanOrchestrator
         {
             ct.ThrowIfCancellationRequested();
             var step = plan[index];
+            if (mode == RuntimeScreenCaptureMode.FullRosterPage && RequiresRosterScreen(step))
+            {
+                AppendTrace(
+                    $"capture {sessionId}: step {index + 1} verify-roster-before-step alias={step.ScreenAlias ?? string.Empty}"
+                );
+                await EnsureVisibleSliceRosterEntryAsync(ct);
+                var selectionSurface = await InspectVisibleSliceEntrySurfaceAsync(index + 1000, ct);
+                AppendTrace(
+                    $"capture {sessionId}: step {index + 1} roster-step-surface home={selectionSurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={selectionSurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
+                );
+                if (!selectionSurface.LooksLikeRosterScreen)
+                {
+                    throw new InvalidOperationException(
+                        $"Scan aborted: roster step {index + 1} is not on the roster screen."
+                    );
+                }
+            }
             if (step.RequiresVisibleSliceEntry)
             {
                 await EnsureVisibleSliceRosterEntryAsync(ct);
@@ -615,7 +654,7 @@ public sealed class ScanOrchestrator
             {
                 throw new InvalidOperationException(BuildGameWindowFailureMessage(windowStatus));
             }
-            if (!TryCaptureRuntimePng(outputPath))
+            if (!await TryCaptureRuntimePngWithRetriesAsync(outputPath, ct))
             {
                 throw new InvalidOperationException(
                     $"Scan aborted: game-window capture failed for step {index + 1} ({step.Role})."
@@ -643,18 +682,38 @@ public sealed class ScanOrchestrator
                     $"capture {sessionId}: equipment-inspection weaponPresent={(currentEquipmentOverview?.WeaponPresent?.ToString() ?? "null")} discs={(currentEquipmentOverview?.DiscSlotOccupancy?.Count ?? 0)}"
                 );
             }
+            else if (mode == RuntimeScreenCaptureMode.FullRosterPage &&
+                     string.Equals(step.Role, "agent_detail", StringComparison.OrdinalIgnoreCase))
+            {
+                var looksLikeHomeScreen = LiveUiDetector.LooksLikeHomeScreen(outputPath);
+                AppendTrace(
+                    $"capture {sessionId}: step {index + 1} agent-detail-surface home={looksLikeHomeScreen.ToString().ToLowerInvariant()}"
+                );
+                if (looksLikeHomeScreen)
+                {
+                    throw new InvalidOperationException(
+                        $"Scan aborted: agent detail capture for slot {step.AgentSlotIndex?.ToString() ?? "unknown"} landed on the home/menu screen."
+                    );
+                }
+            }
         }
 
         return captures;
     }
 
-    private HashSet<int> InspectUnavailableFullRosterSlots(string sessionId, string tempRoot, int? pageIndex)
+    private async Task<HashSet<int>> InspectUnavailableFullRosterSlotsAsync(
+        string sessionId,
+        string tempRoot,
+        int? pageIndex,
+        CancellationToken ct
+    )
     {
         if (pageIndex is not int capturePageIndex || capturePageIndex <= 0)
         {
             return [];
         }
 
+        var strictUiSafety = ReadBooleanFlagFromEnvironment("IKA_STRICT_UI_SAFETY_GUARDS", true);
         var outputPath = Path.Combine(tempRoot, $"00_roster_preflight_page_{capturePageIndex:D2}.png");
         try
         {
@@ -666,11 +725,15 @@ public sealed class ScanOrchestrator
                 );
                 return [];
             }
-            if (!TryCaptureRuntimePng(outputPath))
+            if (!await TryCaptureRuntimePngWithRetriesAsync(outputPath, ct))
             {
                 AppendTrace(
                     $"capture {sessionId}: roster-preflight skipped reason=capture-failed"
                 );
+                if (strictUiSafety)
+                {
+                    throw new InvalidOperationException("Scan aborted: roster preflight capture failed.");
+                }
                 return [];
             }
 
@@ -680,6 +743,10 @@ public sealed class ScanOrchestrator
                 AppendTrace(
                     $"capture {sessionId}: roster-preflight skipped reason=no-slot-inspections"
                 );
+                if (strictUiSafety)
+                {
+                    throw new InvalidOperationException("Scan aborted: roster preflight could not validate visible agent slots.");
+                }
                 return [];
             }
             if (!LiveUiDetector.LooksLikeAgentRosterScreen(outputPath))
@@ -687,6 +754,10 @@ public sealed class ScanOrchestrator
                 AppendTrace(
                     $"capture {sessionId}: roster-preflight skipped reason=not-roster-screen"
                 );
+                if (strictUiSafety)
+                {
+                    throw new InvalidOperationException("Scan aborted: roster preflight detected a non-roster screen.");
+                }
                 return [];
             }
 
@@ -703,6 +774,10 @@ public sealed class ScanOrchestrator
             AppendTrace(
                 $"capture {sessionId}: roster-preflight skipped reason={ex.GetType().Name}:{ex.Message}"
             );
+            if (strictUiSafety)
+            {
+                throw;
+            }
             return [];
         }
         finally
@@ -845,17 +920,24 @@ public sealed class ScanOrchestrator
             ct.ThrowIfCancellationRequested();
             await EnsureGameFocusedAsync(ct);
             var entrySurface = await InspectVisibleSliceEntrySurfaceAsync(attempt + 1, ct);
-            if (entrySurface.LooksLikeHomeScreen &&
-                await TryExecuteGameScriptAsync(entryScript, entryStepDelayMs, entryPostDelayMs, expectFrameChange: true, ct))
+            if (entrySurface.LooksLikeRosterScreen)
             {
-                if (entryStabilizeDelayMs > 0)
-                {
-                    await Task.Delay(entryStabilizeDelayMs, ct);
-                }
+                AppendTrace($"visible-slice-entry attempt={attempt + 1}: already-at-roster");
+                return;
+            }
+            if (await TryEnterVisibleSliceRosterFromHomeAsync(
+                    entrySurface,
+                    attempt + 1,
+                    entryScript,
+                    entryStepDelayMs,
+                    entryPostDelayMs,
+                    entryStabilizeDelayMs,
+                    ct))
+            {
                 return;
             }
 
-            if (attempt == recoveryMaxAttempts - 1 || string.IsNullOrWhiteSpace(recoveryScript))
+            if (string.IsNullOrWhiteSpace(recoveryScript))
             {
                 break;
             }
@@ -867,15 +949,25 @@ public sealed class ScanOrchestrator
                 expectFrameChange: false,
                 ct
             );
-        }
-
-        if (await TryExecuteGameScriptAsync(entryScript, entryStepDelayMs, entryPostDelayMs, expectFrameChange: true, ct))
-        {
-            if (entryStabilizeDelayMs > 0)
+            var postRecoverySurface = await InspectVisibleSliceEntrySurfaceAsync(attempt + 201, ct);
+            AppendTrace(
+                $"visible-slice-entry post-recovery attempt={attempt + 1}: home={postRecoverySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postRecoverySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
+            );
+            if (postRecoverySurface.LooksLikeRosterScreen)
             {
-                await Task.Delay(entryStabilizeDelayMs, ct);
+                return;
             }
-            return;
+            if (await TryEnterVisibleSliceRosterFromHomeAsync(
+                    postRecoverySurface,
+                    attempt + 1,
+                    entryScript,
+                    entryStepDelayMs,
+                    entryPostDelayMs,
+                    entryStabilizeDelayMs,
+                    ct))
+            {
+                return;
+            }
         }
 
         throw new InvalidOperationException(
@@ -902,52 +994,43 @@ public sealed class ScanOrchestrator
     private async Task<string> CaptureVisibleSliceStateProbeAsync(int attempt, CancellationToken ct)
     {
         var tempRoot = ResolveRuntimeTempRoot("entry_state");
-        var captureAttempts = ReadPositiveIntFromEnvironment("IKA_GAME_CAPTURE_FILE_MAX_ATTEMPTS", 3);
-        var readyDelayMs = ReadNonNegativeIntFromEnvironment("IKA_GAME_CAPTURE_FILE_READY_DELAY_MS", 60);
-
-        for (var captureAttempt = 1; captureAttempt <= captureAttempts; captureAttempt++)
+        var path = Path.Combine(tempRoot, $"visible_slice_entry_{attempt:D2}_{Guid.NewGuid():N}.png");
+        if (await TryCaptureRuntimePngWithRetriesAsync(path, ct))
         {
-            var path = Path.Combine(tempRoot, $"visible_slice_entry_{attempt:D2}_{Guid.NewGuid():N}.png");
-            if (!TryCaptureRuntimePng(path))
-            {
-                continue;
-            }
-
-            var fileReadyAttempts = ReadPositiveIntFromEnvironment("IKA_GAME_CAPTURE_FILE_READY_MAX_ATTEMPTS", 8);
-            for (var readyAttempt = 0; readyAttempt < fileReadyAttempts; readyAttempt++)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (File.Exists(path))
-                {
-                    var length = new FileInfo(path).Length;
-                    if (length > 0)
-                    {
-                        return path;
-                    }
-                }
-
-                if (readyDelayMs > 0)
-                {
-                    await Task.Delay(readyDelayMs, ct);
-                }
-            }
-
-            try
-            {
-                if (File.Exists(path))
-                {
-                    File.Delete(path);
-                }
-            }
-            catch
-            {
-                // ignored
-            }
+            return path;
         }
 
         throw new InvalidOperationException(
             "Scan aborted: failed to capture the game window while normalizing live UI state."
         );
+    }
+
+    private async Task<bool> TryEnterVisibleSliceRosterFromHomeAsync(
+        EntrySurfaceProbe surface,
+        int attempt,
+        string entryScript,
+        int entryStepDelayMs,
+        int entryPostDelayMs,
+        int entryStabilizeDelayMs,
+        CancellationToken ct
+    )
+    {
+        if (!surface.LooksLikeHomeScreen ||
+            !await TryExecuteGameScriptAsync(entryScript, entryStepDelayMs, entryPostDelayMs, expectFrameChange: true, ct))
+        {
+            return false;
+        }
+
+        if (entryStabilizeDelayMs > 0)
+        {
+            await Task.Delay(entryStabilizeDelayMs, ct);
+        }
+
+        var postEntrySurface = await InspectVisibleSliceEntrySurfaceAsync(attempt + 101, ct);
+        AppendTrace(
+            $"visible-slice-entry post-entry attempt={attempt}: home={postEntrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postEntrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
+        );
+        return postEntrySurface.LooksLikeRosterScreen;
     }
 
     private async Task ExecuteGameScriptAsync(
@@ -1111,6 +1194,18 @@ public sealed class ScanOrchestrator
                script.Contains("WHEELDOWN", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool RequiresRosterScreen(RuntimeScreenCaptureStep step)
+    {
+        return IsRosterSelectionStep(step);
+    }
+
+    private static bool IsRosterSelectionStep(RuntimeScreenCaptureStep step)
+    {
+        return string.IsNullOrWhiteSpace(step.Role) &&
+               !string.IsNullOrWhiteSpace(step.ScreenAlias) &&
+               step.ScreenAlias.StartsWith("select_agent_", StringComparison.OrdinalIgnoreCase);
+    }
+
     private RosterScanResult AttachInputLockMetadata(RosterScanResult scan)
     {
         var capabilities = scan.Capabilities is { Count: > 0 }
@@ -1193,14 +1288,14 @@ public sealed class ScanOrchestrator
         return $"{string.Join("_", parts)}.png";
     }
 
-    private static string BuildRepeatedKeyScript(string key, int count)
+    private static string BuildRepeatedScript(string token, int count)
     {
-        if (string.IsNullOrWhiteSpace(key) || count <= 0)
+        if (string.IsNullOrWhiteSpace(token) || count <= 0)
         {
             return string.Empty;
         }
 
-        return string.Join(",", Enumerable.Repeat(key.Trim(), count));
+        return string.Join(",", Enumerable.Repeat(token.Trim(), count));
     }
 
     private static string MergeUid(string existing, string incoming, ISet<string> lowConfReasons)
@@ -1747,8 +1842,116 @@ public sealed class ScanOrchestrator
             return true;
         }
 
-        var allowDesktopFallback = ReadBooleanFlagFromEnvironment("IKA_ALLOW_DESKTOP_CAPTURE_FALLBACK", true);
-        return allowDesktopFallback && _nativeBridge.CaptureDesktopPng(outputPath);
+        AppendTrace($"runtime-capture window-capture-failed file={Path.GetFileName(outputPath)}");
+        var allowDesktopFallback = ReadBooleanFlagFromEnvironment("IKA_ALLOW_DESKTOP_CAPTURE_FALLBACK", false);
+        if (!allowDesktopFallback)
+        {
+            return false;
+        }
+
+        var captured = _nativeBridge.CaptureDesktopPng(outputPath);
+        if (captured)
+        {
+            AppendTrace($"runtime-capture desktop-fallback file={Path.GetFileName(outputPath)}");
+        }
+        return captured;
+    }
+
+    private async Task<bool> TryCaptureRuntimePngWithRetriesAsync(string outputPath, CancellationToken ct)
+    {
+        var captureAttempts = ReadPositiveIntFromEnvironment("IKA_RUNTIME_CAPTURE_MAX_ATTEMPTS", 3);
+        var retryDelayMs = ReadNonNegativeIntFromEnvironment("IKA_RUNTIME_CAPTURE_RETRY_DELAY_MS", 120);
+        var fileReadyAttempts = ReadPositiveIntFromEnvironment("IKA_GAME_CAPTURE_FILE_READY_MAX_ATTEMPTS", 8);
+        var readyDelayMs = ReadNonNegativeIntFromEnvironment("IKA_GAME_CAPTURE_FILE_READY_DELAY_MS", 60);
+
+        for (var captureAttempt = 1; captureAttempt <= captureAttempts; captureAttempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            DeleteFileQuietly(outputPath);
+            await EnsureGameFocusedAsync(ct);
+            if (TryCaptureRuntimePng(outputPath))
+            {
+                for (var readyAttempt = 0; readyAttempt < fileReadyAttempts; readyAttempt++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (File.Exists(outputPath))
+                    {
+                        var length = new FileInfo(outputPath).Length;
+                        if (length > 0 && !LooksLikeBlackRuntimeFrame(outputPath))
+                        {
+                            return true;
+                        }
+                    }
+
+                    if (readyDelayMs > 0)
+                    {
+                        await Task.Delay(readyDelayMs, ct);
+                    }
+                }
+            }
+
+            AppendTrace(
+                $"runtime-capture retry attempt={captureAttempt}/{captureAttempts} file={Path.GetFileName(outputPath)}"
+            );
+
+            if (captureAttempt < captureAttempts && retryDelayMs > 0)
+            {
+                await Task.Delay(retryDelayMs, ct);
+            }
+        }
+
+        DeleteFileQuietly(outputPath);
+        return false;
+    }
+
+    private static bool LooksLikeBlackRuntimeFrame(string outputPath)
+    {
+        try
+        {
+            using var bitmap = new Bitmap(outputPath);
+            if (bitmap.Width <= 0 || bitmap.Height <= 0)
+            {
+                return true;
+            }
+
+            var sampleStepX = Math.Max(1, bitmap.Width / 96);
+            var sampleStepY = Math.Max(1, bitmap.Height / 54);
+            var darkSamples = 0;
+            var brightSamples = 0;
+            var totalSamples = 0;
+
+            for (var y = 0; y < bitmap.Height; y += sampleStepY)
+            {
+                for (var x = 0; x < bitmap.Width; x += sampleStepX)
+                {
+                    var pixel = bitmap.GetPixel(x, y);
+                    var luma = (pixel.R + pixel.G + pixel.B) / 3.0;
+                    totalSamples++;
+                    if (luma < 10.0)
+                    {
+                        darkSamples++;
+                    }
+
+                    if (luma > 40.0)
+                    {
+                        brightSamples++;
+                    }
+                }
+            }
+
+            if (totalSamples == 0)
+            {
+                return true;
+            }
+
+            var darkFraction = darkSamples / (double)totalSamples;
+            var brightFraction = brightSamples / (double)totalSamples;
+            return darkFraction >= 0.995 && brightFraction <= 0.002;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     private static bool ReadBooleanFlagFromEnvironment(string envVar, bool fallback)
