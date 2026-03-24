@@ -84,7 +84,7 @@ internal static class Program
             Console.Error.WriteLine($"[live-scan] cvRoot={cvRoot ?? "<null>"}");
             if (bundledAssets is not null)
             {
-                var bundleManifestPath = Path.Combine(bundledAssets.RootPath, "bundle.manifest.json");
+                var bundleManifestPath = bundledAssets.ManifestPath;
                 Console.Error.WriteLine($"[live-scan] bundleManifestPath={bundleManifestPath}");
                 Console.Error.WriteLine(
                     $"[live-scan] bundleManifestSummary={JsonSerializer.Serialize(ReadBundleManifestSummary(bundleManifestPath), JsonOptions)}"

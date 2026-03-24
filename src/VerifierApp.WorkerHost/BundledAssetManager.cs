@@ -11,7 +11,8 @@ public sealed record BundledAssetPaths(
     string WorkerExePath,
     string NativeDllPath,
     string OcrScanRoot,
-    string CvRoot
+    string CvRoot,
+    string ManifestPath
 );
 
 public static class BundledAssetManager
@@ -99,7 +100,7 @@ public static class BundledAssetManager
         EnsureArchiveExtracted(ocrBundlePath, ocrRoot, hashes.GetValueOrDefault("ocr_scan_bundle.zip"));
         EnsureArchiveExtracted(cvBundlePath, cvRoot, hashes.GetValueOrDefault("cv_bundle.zip"));
 
-        return new BundledAssetPaths(root, cudaRoot, workerPath, nativePath, ocrRoot, cvRoot);
+        return new BundledAssetPaths(root, cudaRoot, workerPath, nativePath, ocrRoot, cvRoot, manifestPath);
     }
 
     private static string ResolveExtractionRoot(string? sidecarRootOverride, string sidecarRoot, string appVersion)
