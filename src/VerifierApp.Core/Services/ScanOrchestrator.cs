@@ -207,6 +207,10 @@ public sealed class ScanOrchestrator
         CancellationToken ct
     )
     {
+        var initialSurface = await InspectVisibleSliceEntrySurfaceAsync(0, ct);
+        AppendTrace(
+            $"full-sync initial-surface home={initialSurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={initialSurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
+        );
         await EnsureVisibleSliceRosterEntryAsync(ct);
 
         var maxPages = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_MAX_PAGES", 64);
@@ -245,7 +249,7 @@ public sealed class ScanOrchestrator
                 ct
             );
         }
-        if (initialUpSteps > 0)
+        if (initialUpSteps > 0 && !initialSurface.LooksLikeRosterScreen)
         {
             var resetScript = BuildRepeatedScript("UP", initialUpSteps);
             if (!string.IsNullOrWhiteSpace(resetScript))
@@ -259,6 +263,10 @@ public sealed class ScanOrchestrator
                     ct
                 );
             }
+        }
+        else if (initialUpSteps > 0)
+        {
+            AppendTrace("full-sync initial cursor reset skipped because roster was already active");
         }
         if (!string.IsNullOrWhiteSpace(initialColumnNormalizeScript))
         {
@@ -557,8 +565,9 @@ public sealed class ScanOrchestrator
             : new HashSet<int>();
         var loggedUnavailableAgentSlots = new HashSet<int>();
         var rosterScreenKnownGood = mode == RuntimeScreenCaptureMode.FullRosterPage && pageIndex is > 0;
+        var includesDiskDetails = plan.Any(step => string.Equals(step.Role, "disk_detail", StringComparison.OrdinalIgnoreCase));
         AppendTrace(
-            $"capture {sessionId}: policy mode={mode} steps={plan.Count} rosterProbePolicy=selection_only rosterFastPath={rosterScreenKnownGood.ToString().ToLowerInvariant()} focusCache=true"
+            $"capture {sessionId}: policy mode={mode} steps={plan.Count} rosterProbePolicy=selection_only rosterFastPath={rosterScreenKnownGood.ToString().ToLowerInvariant()} focusCache=true diskDetails={includesDiskDetails.ToString().ToLowerInvariant()}"
         );
 
         var captures = new List<ScreenCaptureInput>();

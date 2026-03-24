@@ -200,6 +200,7 @@ internal static class RuntimeScreenCapturePlan
     {
         var requiresVisibleSliceEntry = mode == RuntimeScreenCaptureMode.VisibleSlice;
         var exitAgentGridWhenDone = mode == RuntimeScreenCaptureMode.VisibleSlice;
+        var includeDiskDetails = ShouldIncludeDiskDetails(mode);
         var steps = new List<RuntimeScreenCaptureStep>();
         for (var index = 0; index < VisibleAgentGridPoints.Length; index++)
         {
@@ -209,7 +210,7 @@ internal static class RuntimeScreenCapturePlan
             steps.Add(CreateAgentDetailCapture(agentSlotIndex));
             if (includeEquipment)
             {
-                AddEquipmentFlow(steps, agentSlotIndex);
+                AddEquipmentFlow(steps, agentSlotIndex, includeDiskDetails);
             }
             else
             {
@@ -234,6 +235,20 @@ internal static class RuntimeScreenCapturePlan
         }
 
         return steps;
+    }
+
+    private static bool ShouldIncludeDiskDetails(RuntimeScreenCaptureMode mode)
+    {
+        var value = Environment.GetEnvironmentVariable("IKA_INCLUDE_DISK_DETAILS");
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("on", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return mode == RuntimeScreenCaptureMode.VisibleSlice;
     }
 
     private static RuntimeScreenCaptureStep CreateAgentSelectStep(
@@ -267,7 +282,11 @@ internal static class RuntimeScreenCapturePlan
             RequiresVisibleSliceEntry: requiresVisibleSliceEntry
         );
 
-    private static void AddEquipmentFlow(ICollection<RuntimeScreenCaptureStep> steps, int agentSlotIndex)
+    private static void AddEquipmentFlow(
+        ICollection<RuntimeScreenCaptureStep> steps,
+        int agentSlotIndex,
+        bool includeDiskDetails
+    )
     {
         steps.Add(
             new RuntimeScreenCaptureStep(
@@ -305,34 +324,37 @@ internal static class RuntimeScreenCapturePlan
                 ExpectFrameChange: true
             )
         );
-        foreach (var (slotIndex, x, y) in DiskSlotPoints)
+        if (includeDiskDetails)
         {
-            steps.Add(
-                new RuntimeScreenCaptureStep(
-                    Role: "disk_detail",
-                    Script: Click(x, y),
-                    AgentSlotIndex: agentSlotIndex,
-                    SlotIndex: slotIndex,
-                    ScreenAlias: $"agent_{agentSlotIndex}_disk_{slotIndex}",
-                    StepDelayMs: 120,
-                    PostDelayMs: 700,
-                    Capture: true,
-                    ExpectFrameChange: true
-                )
-            );
-            steps.Add(
-                new RuntimeScreenCaptureStep(
-                    Role: string.Empty,
-                    Script: "ESC",
-                    AgentSlotIndex: agentSlotIndex,
-                    SlotIndex: slotIndex,
-                    ScreenAlias: $"exit_agent_{agentSlotIndex}_disk_{slotIndex}",
-                    StepDelayMs: 120,
-                    PostDelayMs: 450,
-                    Capture: false,
-                    ExpectFrameChange: true
-                )
-            );
+            foreach (var (slotIndex, x, y) in DiskSlotPoints)
+            {
+                steps.Add(
+                    new RuntimeScreenCaptureStep(
+                        Role: "disk_detail",
+                        Script: Click(x, y),
+                        AgentSlotIndex: agentSlotIndex,
+                        SlotIndex: slotIndex,
+                        ScreenAlias: $"agent_{agentSlotIndex}_disk_{slotIndex}",
+                        StepDelayMs: 120,
+                        PostDelayMs: 700,
+                        Capture: true,
+                        ExpectFrameChange: true
+                    )
+                );
+                steps.Add(
+                    new RuntimeScreenCaptureStep(
+                        Role: string.Empty,
+                        Script: "ESC",
+                        AgentSlotIndex: agentSlotIndex,
+                        SlotIndex: slotIndex,
+                        ScreenAlias: $"exit_agent_{agentSlotIndex}_disk_{slotIndex}",
+                        StepDelayMs: 120,
+                        PostDelayMs: 450,
+                        Capture: false,
+                        ExpectFrameChange: true
+                    )
+                );
+            }
         }
         AddReturnToAgentGridStep(steps, agentSlotIndex);
     }
