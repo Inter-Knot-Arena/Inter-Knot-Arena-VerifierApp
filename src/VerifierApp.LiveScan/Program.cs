@@ -26,6 +26,7 @@ internal static class Program
 
         try
         {
+            WriteDiagnostic("boot-start");
             EnsureProcessEnvironmentDefault("IKA_ALLOW_SOFT_INPUT_LOCK", "1");
             EnsureProcessEnvironmentDefault("IKA_DEFAULT_OCR_CAPTURE_PLAN", "VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA");
             EnsureProcessEnvironmentDefault("IKA_KEY_SCRIPT_BACKEND", "native");
@@ -77,28 +78,28 @@ internal static class Program
                 return await RunProbeAsync(options, cts.Token);
             }
 
-            Console.Error.WriteLine($"[live-scan] mode={(bundledAssets is null ? "repo" : "bundled")}");
-            Console.Error.WriteLine($"[live-scan] repoRoot={repoRoot ?? "<null>"}");
-            Console.Error.WriteLine($"[live-scan] bundleSidecarRoot={bundleSidecarRoot ?? "<null>"}");
-            Console.Error.WriteLine($"[live-scan] bundleExtractRoot={bundledAssets?.RootPath ?? "<null>"}");
-            Console.Error.WriteLine($"[live-scan] ocrRoot={ocrRoot ?? "<null>"}");
-            Console.Error.WriteLine($"[live-scan] cvRoot={cvRoot ?? "<null>"}");
+            WriteDiagnostic($"mode={(bundledAssets is null ? "repo" : "bundled")}");
+            WriteDiagnostic($"repoRoot={repoRoot ?? "<null>"}");
+            WriteDiagnostic($"bundleSidecarRoot={bundleSidecarRoot ?? "<null>"}");
+            WriteDiagnostic($"bundleExtractRoot={bundledAssets?.RootPath ?? "<null>"}");
+            WriteDiagnostic($"ocrRoot={ocrRoot ?? "<null>"}");
+            WriteDiagnostic($"cvRoot={cvRoot ?? "<null>"}");
             if (bundledAssets is not null)
             {
                 var bundleManifestPath = bundledAssets.ManifestPath;
-                Console.Error.WriteLine($"[live-scan] bundleManifestPath={bundleManifestPath}");
-                Console.Error.WriteLine(
-                    $"[live-scan] bundleManifestSummary={JsonSerializer.Serialize(ReadBundleManifestSummary(bundleManifestPath), JsonOptions)}"
+                WriteDiagnostic($"bundleManifestPath={bundleManifestPath}");
+                WriteDiagnostic(
+                    $"bundleManifestSummary={JsonSerializer.Serialize(ReadBundleManifestSummary(bundleManifestPath), JsonOptions)}"
                 );
             }
-            Console.Error.WriteLine($"[live-scan] pipeName={options.PipeName}");
+            WriteDiagnostic($"pipeName={options.PipeName}");
             if (!string.IsNullOrWhiteSpace(ocrRoot))
             {
                 var amplifierPath = Path.Combine(ocrRoot, "amplifier_identity.py");
                 if (File.Exists(amplifierPath))
                 {
-                    Console.Error.WriteLine(
-                        $"[live-scan] ocrAmplifierPath={amplifierPath} mtimeUtc={File.GetLastWriteTimeUtc(amplifierPath):O}"
+                    WriteDiagnostic(
+                        $"ocrAmplifierPath={amplifierPath} mtimeUtc={File.GetLastWriteTimeUtc(amplifierPath):O}"
                     );
                 }
             }
@@ -125,8 +126,8 @@ internal static class Program
                 throw new InvalidOperationException("Worker health probe failed.");
             }
             var workerHealthDetails = await worker.HealthDetailsAsync(cts.Token);
-            Console.Error.WriteLine(
-                $"[live-scan] workerHealthDetails={JsonSerializer.Serialize(workerHealthDetails, JsonOptions)}"
+            WriteDiagnostic(
+                $"workerHealthDetails={JsonSerializer.Serialize(workerHealthDetails, JsonOptions)}"
             );
 
             var orchestrator = new ScanOrchestrator(worker, nativeBridge);
@@ -146,8 +147,8 @@ internal static class Program
                     $"verifier_wall_ms_{Math.Round(scanStopwatch.Elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero)}"
                 )
             };
-            Console.Error.WriteLine(
-                $"[live-scan] wallMs={scanStopwatch.Elapsed.TotalMilliseconds:F2}"
+            WriteDiagnostic(
+                $"wallMs={scanStopwatch.Elapsed.TotalMilliseconds:F2}"
             );
 
             var json = JsonSerializer.Serialize(result, JsonOptions);
@@ -167,13 +168,58 @@ internal static class Program
         }
         catch (OperationCanceledException)
         {
-            Console.Error.WriteLine("Live scan cancelled.");
+            WriteDiagnostic("cancelled");
             return 130;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            WriteDiagnostic($"error={ex.Message}");
             return 1;
+        }
+    }
+
+    private static void WriteDiagnostic(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        var formatted = $"[live-scan] {message}";
+        try
+        {
+            Console.Error.WriteLine(formatted);
+        }
+        catch
+        {
+            // ignored
+        }
+
+        TryAppendDiagnosticTrace(formatted);
+    }
+
+    private static void TryAppendDiagnosticTrace(string message)
+    {
+        var rawPath = Environment.GetEnvironmentVariable("IKA_LIVE_SCAN_TRACE_PATH");
+        if (string.IsNullOrWhiteSpace(rawPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(rawPath);
+            var directory = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.AppendAllText(fullPath, $"[{DateTime.UtcNow:O}] {message}{Environment.NewLine}");
+        }
+        catch
+        {
+            // ignored
         }
     }
 
