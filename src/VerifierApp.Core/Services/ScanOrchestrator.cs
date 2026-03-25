@@ -75,11 +75,11 @@ public sealed class ScanOrchestrator
             var shouldRunScanScript = true;
             if (string.Equals(scanScript, DefaultLiveEntryScript, StringComparison.OrdinalIgnoreCase))
             {
-                var entrySurface = await InspectVisibleSliceEntrySurfaceAsync(0, ct);
-                AppendTrace(
-                    $"scan-entry-surface home={entrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={entrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
-                );
-                shouldRunScanScript = !entrySurface.LooksLikeHomeScreen && !entrySurface.LooksLikeRosterScreen;
+            var entrySurface = await InspectVisibleSliceEntrySurfaceAsync(0, ct);
+            AppendTrace(
+                $"scan-entry-surface home={entrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={entrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={entrySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={entrySurface.AspectRatio:F4} size={entrySurface.Width}x{entrySurface.Height}"
+            );
+            shouldRunScanScript = !entrySurface.LooksLikeHomeScreen && !entrySurface.LooksLikeRosterScreen;
             }
 
             if (shouldRunScanScript)
@@ -210,7 +210,7 @@ public sealed class ScanOrchestrator
     {
         var initialSurface = await InspectVisibleSliceEntrySurfaceAsync(0, ct);
         AppendTrace(
-            $"full-sync initial-surface home={initialSurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={initialSurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
+            $"full-sync initial-surface home={initialSurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={initialSurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={initialSurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={initialSurface.AspectRatio:F4} size={initialSurface.Width}x{initialSurface.Height}"
         );
         await EnsureVisibleSliceRosterEntryAsync(ct);
 
@@ -1008,6 +1008,12 @@ public sealed class ScanOrchestrator
             ct.ThrowIfCancellationRequested();
             await EnsureGameFocusedAsync(ct);
             var entrySurface = await InspectVisibleSliceEntrySurfaceAsync(attempt + 1, ct);
+            if (!entrySurface.LooksLikeSupportedWideLayout)
+            {
+                throw new InvalidOperationException(
+                    $"Scan aborted: the current game window layout ({entrySurface.Width}x{entrySurface.Height}, aspect {entrySurface.AspectRatio:F4}) is outside the supported wide-layout family."
+                );
+            }
             if (entrySurface.LooksLikeRosterScreen)
             {
                 AppendTrace($"visible-slice-entry attempt={attempt + 1}: already-at-roster");
@@ -1039,7 +1045,7 @@ public sealed class ScanOrchestrator
             );
             var postRecoverySurface = await InspectVisibleSliceEntrySurfaceAsync(attempt + 201, ct);
             AppendTrace(
-                $"visible-slice-entry post-recovery attempt={attempt + 1}: home={postRecoverySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postRecoverySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
+                $"visible-slice-entry post-recovery attempt={attempt + 1}: home={postRecoverySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postRecoverySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={postRecoverySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={postRecoverySurface.AspectRatio:F4}"
             );
             if (postRecoverySurface.LooksLikeRosterScreen)
             {
@@ -1068,9 +1074,14 @@ public sealed class ScanOrchestrator
         var stateProbePath = await CaptureVisibleSliceStateProbeAsync(attempt, ct);
         try
         {
+            var layout = LiveUiDetector.InspectLayout(stateProbePath);
             return new EntrySurfaceProbe(
                 LiveUiDetector.LooksLikeHomeScreen(stateProbePath),
-                LiveUiDetector.LooksLikeAgentRosterScreen(stateProbePath)
+                LiveUiDetector.LooksLikeAgentRosterScreen(stateProbePath),
+                layout.Width,
+                layout.Height,
+                layout.AspectRatio,
+                layout.LooksLikeSupportedWideLayout
             );
         }
         finally
@@ -1116,7 +1127,7 @@ public sealed class ScanOrchestrator
 
         var postEntrySurface = await InspectVisibleSliceEntrySurfaceAsync(attempt + 101, ct);
         AppendTrace(
-            $"visible-slice-entry post-entry attempt={attempt}: home={postEntrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postEntrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()}"
+            $"visible-slice-entry post-entry attempt={attempt}: home={postEntrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postEntrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={postEntrySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={postEntrySurface.AspectRatio:F4}"
         );
         return postEntrySurface.LooksLikeRosterScreen;
     }
@@ -2177,5 +2188,9 @@ public sealed class ScanOrchestrator
 
 internal sealed record EntrySurfaceProbe(
     bool LooksLikeHomeScreen,
-    bool LooksLikeRosterScreen
+    bool LooksLikeRosterScreen,
+    int Width,
+    int Height,
+    double AspectRatio,
+    bool LooksLikeSupportedWideLayout
 );

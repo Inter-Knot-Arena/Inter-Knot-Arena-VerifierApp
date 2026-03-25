@@ -31,6 +31,8 @@ internal static class LiveUiDetector
     private const double ActiveTabHighlightMinLuma = 100.0;
     private const double ActiveTabHighlightMinFraction = 0.18;
     private const double ActiveTabHighlightDominanceMargin = 0.08;
+    private const double SupportedWideLayoutAspectRatio = 16.0 / 9.0;
+    private const double SupportedWideLayoutAspectTolerance = 0.20;
     // These boxes must stay aligned with the same top-row cards that the runtime
     // capture plan clicks via select_agent_1/2/3.
     private static readonly (int AgentSlotIndex, double X, double Y, double Width, double Height)[] VisibleRosterSlotBoxes =
@@ -234,6 +236,29 @@ internal static class LiveUiDetector
             looksLikeEquipmentScreen,
             Math.Round(baseStatsHighlightFraction, 4),
             Math.Round(equipmentHighlightFraction, 4)
+        );
+    }
+
+    public static LayoutInspection InspectLayout(string screenshotPath)
+    {
+        if (string.IsNullOrWhiteSpace(screenshotPath) || !File.Exists(screenshotPath))
+        {
+            return new LayoutInspection(0, 0, 0.0, false);
+        }
+
+        using var screenshot = new Bitmap(screenshotPath);
+        if (screenshot.Width <= 0 || screenshot.Height <= 0)
+        {
+            return new LayoutInspection(0, 0, 0.0, false);
+        }
+
+        var aspectRatio = screenshot.Width / (double)screenshot.Height;
+        var supported = Math.Abs(aspectRatio - SupportedWideLayoutAspectRatio) <= SupportedWideLayoutAspectTolerance;
+        return new LayoutInspection(
+            screenshot.Width,
+            screenshot.Height,
+            Math.Round(aspectRatio, 4),
+            supported
         );
     }
 
@@ -674,4 +699,11 @@ internal sealed record AgentProfileSurfaceInspection(
     bool LooksLikeEquipmentScreen,
     double BaseStatsHighlightFraction,
     double EquipmentHighlightFraction
+);
+
+internal sealed record LayoutInspection(
+    int Width,
+    int Height,
+    double AspectRatio,
+    bool LooksLikeSupportedWideLayout
 );
