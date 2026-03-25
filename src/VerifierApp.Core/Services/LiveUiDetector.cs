@@ -85,12 +85,19 @@ internal static class LiveUiDetector
             return false;
         }
 
-        var targetWidth = Math.Max(32, (int)Math.Round(screenshot.Width * HomeAgentsWidthFraction));
-        var targetHeight = Math.Max(24, (int)Math.Round(screenshot.Height * HomeAgentsHeightFraction));
-        var searchLeft = (int)Math.Round(screenshot.Width * SearchLeftFraction);
-        var searchTop = (int)Math.Round(screenshot.Height * SearchTopFraction);
-        var searchRight = (int)Math.Round(screenshot.Width * SearchRightFraction);
-        var searchBottom = (int)Math.Round(screenshot.Height * SearchBottomFraction);
+        var layout = LiveLayoutProfiles.Inspect(screenshot.Width, screenshot.Height);
+        if (!layout.LooksLikeSupportedWideLayout)
+        {
+            return false;
+        }
+
+        var profile = LiveLayoutProfiles.Get(layout.LayoutProfileKind);
+        var targetWidth = Math.Max(32, (int)Math.Round(screenshot.Width * profile.HomeAgentsTemplateSize.Width));
+        var targetHeight = Math.Max(24, (int)Math.Round(screenshot.Height * profile.HomeAgentsTemplateSize.Height));
+        var searchLeft = (int)Math.Round(screenshot.Width * profile.HomeAgentsSearchBounds.Left);
+        var searchTop = (int)Math.Round(screenshot.Height * profile.HomeAgentsSearchBounds.Top);
+        var searchRight = (int)Math.Round(screenshot.Width * profile.HomeAgentsSearchBounds.Right);
+        var searchBottom = (int)Math.Round(screenshot.Height * profile.HomeAgentsSearchBounds.Bottom);
         var maxLeft = Math.Max(searchLeft, searchRight - targetWidth);
         var maxTop = Math.Max(searchTop, searchBottom - targetHeight);
         var stepX = Math.Max(8, targetWidth / 10);
@@ -135,10 +142,17 @@ internal static class LiveUiDetector
             return [];
         }
 
-        var inspections = new List<RosterSlotInspection>(VisibleRosterSlotBoxes.Length);
-        foreach (var (agentSlotIndex, x, y, width, height) in VisibleRosterSlotBoxes)
+        var layout = LiveLayoutProfiles.Inspect(screenshot.Width, screenshot.Height);
+        if (!layout.LooksLikeSupportedWideLayout)
         {
-            var slotRect = FractionalRectangle(screenshot, x, y, width, height);
+            return [];
+        }
+
+        var profile = LiveLayoutProfiles.Get(layout.LayoutProfileKind);
+        var inspections = new List<RosterSlotInspection>(profile.VisibleRosterSlotBoxes.Count);
+        foreach (var box in profile.VisibleRosterSlotBoxes)
+        {
+            var slotRect = FractionalRectangle(screenshot, box.X, box.Y, box.Width, box.Height);
             if (slotRect.Width <= 0 || slotRect.Height <= 0)
             {
                 continue;
@@ -151,7 +165,7 @@ internal static class LiveUiDetector
             var looksUnavailableByLockBadge = LooksUnavailableByLockBadge(lockBadgeDetected, metrics);
             inspections.Add(
                 new RosterSlotInspection(
-                    agentSlotIndex,
+                    box.AgentSlotIndex,
                     !looksUnavailableVisualStyle && !looksUnavailableByLockBadge,
                     lockBadgeDetected,
                     looksUnavailableVisualStyle,
@@ -203,24 +217,31 @@ internal static class LiveUiDetector
             return new AgentProfileSurfaceInspection(looksLikeHomeScreen, looksLikeRosterScreen, false, false, 0.0, 0.0);
         }
 
+        var layout = LiveLayoutProfiles.Inspect(screenshot.Width, screenshot.Height);
+        if (!layout.LooksLikeSupportedWideLayout)
+        {
+            return new AgentProfileSurfaceInspection(looksLikeHomeScreen, looksLikeRosterScreen, false, false, 0.0, 0.0);
+        }
+
+        var profile = LiveLayoutProfiles.Get(layout.LayoutProfileKind);
         var baseStatsHighlightFraction = MeasureHighlightFraction(
             screenshot,
             FractionalRectangle(
                 screenshot,
-                BaseStatsTabLeftFraction,
-                BaseStatsTabTopFraction,
-                BaseStatsTabWidthFraction,
-                BaseStatsTabHeightFraction
+                profile.BaseStatsTabBox.X,
+                profile.BaseStatsTabBox.Y,
+                profile.BaseStatsTabBox.Width,
+                profile.BaseStatsTabBox.Height
             )
         );
         var equipmentHighlightFraction = MeasureHighlightFraction(
             screenshot,
             FractionalRectangle(
                 screenshot,
-                EquipmentTabLeftFraction,
-                EquipmentTabTopFraction,
-                EquipmentTabWidthFraction,
-                EquipmentTabHeightFraction
+                profile.EquipmentTabBox.X,
+                profile.EquipmentTabBox.Y,
+                profile.EquipmentTabBox.Width,
+                profile.EquipmentTabBox.Height
             )
         );
         var looksLikeAgentDetailScreen =
@@ -243,23 +264,16 @@ internal static class LiveUiDetector
     {
         if (string.IsNullOrWhiteSpace(screenshotPath) || !File.Exists(screenshotPath))
         {
-            return new LayoutInspection(0, 0, 0.0, false);
+            return new LayoutInspection(0, 0, 0.0, false, LayoutProfileKind.Unknown);
         }
 
         using var screenshot = new Bitmap(screenshotPath);
         if (screenshot.Width <= 0 || screenshot.Height <= 0)
         {
-            return new LayoutInspection(0, 0, 0.0, false);
+            return new LayoutInspection(0, 0, 0.0, false, LayoutProfileKind.Unknown);
         }
 
-        var aspectRatio = screenshot.Width / (double)screenshot.Height;
-        var supported = Math.Abs(aspectRatio - SupportedWideLayoutAspectRatio) <= SupportedWideLayoutAspectTolerance;
-        return new LayoutInspection(
-            screenshot.Width,
-            screenshot.Height,
-            Math.Round(aspectRatio, 4),
-            supported
-        );
+        return LiveLayoutProfiles.Inspect(screenshot.Width, screenshot.Height);
     }
 
     public static LiveSafetySurfaceInspection InspectLiveSafetySurface(string screenshotPath)
@@ -270,6 +284,7 @@ internal static class LiveUiDetector
         var looksDangerous = surfaceKind == LiveSafeSurfaceKind.Unknown;
         return new LiveSafetySurfaceInspection(
             surfaceKind,
+            layout.LayoutProfileKind,
             layout.Width,
             layout.Height,
             layout.AspectRatio,
@@ -747,7 +762,8 @@ internal sealed record LayoutInspection(
     int Width,
     int Height,
     double AspectRatio,
-    bool LooksLikeSupportedWideLayout
+    bool LooksLikeSupportedWideLayout,
+    LayoutProfileKind LayoutProfileKind
 );
 
 internal enum LiveSafeSurfaceKind
@@ -761,6 +777,7 @@ internal enum LiveSafeSurfaceKind
 
 internal sealed record LiveSafetySurfaceInspection(
     LiveSafeSurfaceKind SurfaceKind,
+    LayoutProfileKind LayoutProfileKind,
     int Width,
     int Height,
     double AspectRatio,

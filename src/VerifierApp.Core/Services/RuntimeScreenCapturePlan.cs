@@ -30,35 +30,19 @@ internal static class RuntimeScreenCapturePlan
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string DefaultPreset = "VISIBLE_SLICE_AGENT_DETAIL_V1";
     private const string RichEquipmentPreset = "VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA";
-    private static readonly (int AgentSlotIndex, double X, double Y)[] VisibleAgentGridPoints =
-    [
-        (1, 0.597, 0.135),
-        (2, 0.688, 0.197),
-        (3, 0.814, 0.124),
-    ];
-    private static readonly (int SlotIndex, double X, double Y)[] DiskSlotPoints =
-    [
-        (1, 0.632, 0.284),
-        (2, 0.571, 0.487),
-        (3, 0.632, 0.691),
-        (4, 0.825, 0.691),
-        (5, 0.866, 0.487),
-        (6, 0.825, 0.284),
-    ];
-    private const double HomeAgentsIconX = 0.660;
-    private const double HomeAgentsIconY = 0.905;
-    private const double BaseButtonX = 0.606;
-    private const double BaseButtonY = 0.776;
-    private const double EquipmentButtonX = 0.823;
-    private const double EquipmentButtonY = 0.907;
-    private const double AmplifierX = 0.694;
-    private const double AmplifierY = 0.496;
 
-    public static string DefaultVisibleSliceEntryScript => Click(HomeAgentsIconX, HomeAgentsIconY);
+    public static string DefaultVisibleSliceEntryScript(
+        LayoutProfileKind layoutProfile = LayoutProfileKind.Wide16x9
+    )
+    {
+        var profile = LiveLayoutProfiles.Get(layoutProfile);
+        return Click(profile.HomeAgentsClickPoint.X, profile.HomeAgentsClickPoint.Y);
+    }
 
     public static IReadOnlyList<RuntimeScreenCaptureStep> LoadActivePlan(
         RuntimeScreenCaptureMode mode = RuntimeScreenCaptureMode.VisibleSlice,
-        RosterScanProfile scanProfile = RosterScanProfile.Fast
+        RosterScanProfile scanProfile = RosterScanProfile.Fast,
+        LayoutProfileKind layoutProfile = LayoutProfileKind.Wide16x9
     )
     {
         var envPlan = LoadFromEnvironment(mode);
@@ -67,7 +51,7 @@ internal static class RuntimeScreenCapturePlan
             return envPlan;
         }
 
-        return LoadDefaultPreset(mode, scanProfile);
+        return LoadDefaultPreset(mode, scanProfile, layoutProfile);
     }
 
     private static IReadOnlyList<RuntimeScreenCaptureStep> LoadFromEnvironment(RuntimeScreenCaptureMode mode)
@@ -103,7 +87,8 @@ internal static class RuntimeScreenCapturePlan
 
     private static IReadOnlyList<RuntimeScreenCaptureStep> LoadDefaultPreset(
         RuntimeScreenCaptureMode mode,
-        RosterScanProfile scanProfile
+        RosterScanProfile scanProfile,
+        LayoutProfileKind layoutProfile
     )
     {
         var preset = Environment.GetEnvironmentVariable("IKA_DEFAULT_OCR_CAPTURE_PLAN");
@@ -121,11 +106,11 @@ internal static class RuntimeScreenCapturePlan
 
         if (preset.Equals(DefaultPreset, StringComparison.OrdinalIgnoreCase))
         {
-            return CreateVisibleSliceAgentDetailPlan(mode, scanProfile);
+            return CreateVisibleSliceAgentDetailPlan(mode, scanProfile, layoutProfile);
         }
         if (preset.Equals(RichEquipmentPreset, StringComparison.OrdinalIgnoreCase))
         {
-            return CreateVisibleSliceRichEquipmentPlan(mode, scanProfile);
+            return CreateVisibleSliceRichEquipmentPlan(mode, scanProfile, layoutProfile);
         }
 
         return [];
@@ -195,35 +180,39 @@ internal static class RuntimeScreenCapturePlan
 
     private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceAgentDetailPlan(
         RuntimeScreenCaptureMode mode,
-        RosterScanProfile scanProfile
+        RosterScanProfile scanProfile,
+        LayoutProfileKind layoutProfile
     ) =>
-        CreateGameplayAgentGridPlan(includeEquipment: false, mode, scanProfile);
+        CreateGameplayAgentGridPlan(includeEquipment: false, mode, scanProfile, layoutProfile);
 
     private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceRichEquipmentPlan(
         RuntimeScreenCaptureMode mode,
-        RosterScanProfile scanProfile
+        RosterScanProfile scanProfile,
+        LayoutProfileKind layoutProfile
     ) =>
-        CreateGameplayAgentGridPlan(includeEquipment: true, mode, scanProfile);
+        CreateGameplayAgentGridPlan(includeEquipment: true, mode, scanProfile, layoutProfile);
 
     private static IReadOnlyList<RuntimeScreenCaptureStep> CreateGameplayAgentGridPlan(
         bool includeEquipment,
         RuntimeScreenCaptureMode mode,
-        RosterScanProfile scanProfile
+        RosterScanProfile scanProfile,
+        LayoutProfileKind layoutProfile
     )
     {
+        var profile = LiveLayoutProfiles.Get(layoutProfile);
         var requiresVisibleSliceEntry = mode == RuntimeScreenCaptureMode.VisibleSlice;
         var exitAgentGridWhenDone = mode == RuntimeScreenCaptureMode.VisibleSlice;
         var includeDiskDetails = ShouldIncludeDiskDetails(mode, scanProfile);
         var steps = new List<RuntimeScreenCaptureStep>();
-        for (var index = 0; index < VisibleAgentGridPoints.Length; index++)
+        for (var index = 0; index < profile.VisibleAgentGridPoints.Count; index++)
         {
-            var point = VisibleAgentGridPoints[index];
+            var point = profile.VisibleAgentGridPoints[index];
             var agentSlotIndex = point.AgentSlotIndex;
             steps.Add(CreateAgentSelectStep(agentSlotIndex, point.X, point.Y, requiresVisibleSliceEntry));
-            steps.Add(CreateAgentDetailCapture(agentSlotIndex));
+            steps.Add(CreateAgentDetailCapture(agentSlotIndex, profile));
             if (includeEquipment)
             {
-                AddEquipmentFlow(steps, agentSlotIndex, includeDiskDetails);
+                AddEquipmentFlow(steps, agentSlotIndex, includeDiskDetails, profile);
             }
             else
             {
@@ -237,7 +226,7 @@ internal static class RuntimeScreenCapturePlan
                 new RuntimeScreenCaptureStep(
                     Role: string.Empty,
                     Script: "ESC",
-                    AgentSlotIndex: VisibleAgentGridPoints.Length,
+                    AgentSlotIndex: profile.VisibleAgentGridPoints.Count,
                     ScreenAlias: "exit_agent_grid",
                     StepDelayMs: 120,
                     PostDelayMs: 240,
@@ -288,10 +277,14 @@ internal static class RuntimeScreenCapturePlan
             ExpectedSurfaceKind: LiveSafeSurfaceKind.Roster
         );
 
-    private static RuntimeScreenCaptureStep CreateAgentDetailCapture(int agentSlotIndex, bool requiresVisibleSliceEntry = false) =>
+    private static RuntimeScreenCaptureStep CreateAgentDetailCapture(
+        int agentSlotIndex,
+        LayoutProfile profile,
+        bool requiresVisibleSliceEntry = false
+    ) =>
         new(
             Role: "agent_detail",
-            Script: Click(BaseButtonX, BaseButtonY),
+            Script: Click(profile.BaseButtonPoint.X, profile.BaseButtonPoint.Y),
             AgentSlotIndex: agentSlotIndex,
             ScreenAlias: $"agent_{agentSlotIndex}_detail",
             StepDelayMs: 120,
@@ -304,13 +297,14 @@ internal static class RuntimeScreenCapturePlan
     private static void AddEquipmentFlow(
         ICollection<RuntimeScreenCaptureStep> steps,
         int agentSlotIndex,
-        bool includeDiskDetails
+        bool includeDiskDetails,
+        LayoutProfile profile
     )
     {
         steps.Add(
             new RuntimeScreenCaptureStep(
                 Role: "equipment",
-                Script: Click(EquipmentButtonX, EquipmentButtonY),
+                Script: Click(profile.EquipmentButtonPoint.X, profile.EquipmentButtonPoint.Y),
                 AgentSlotIndex: agentSlotIndex,
                 ScreenAlias: $"agent_{agentSlotIndex}_equipment",
                 StepDelayMs: 120,
@@ -323,7 +317,7 @@ internal static class RuntimeScreenCapturePlan
         steps.Add(
             new RuntimeScreenCaptureStep(
                 Role: "amplifier_detail",
-                Script: Click(AmplifierX, AmplifierY),
+                Script: Click(profile.AmplifierClickPoint.X, profile.AmplifierClickPoint.Y),
                 AgentSlotIndex: agentSlotIndex,
                 ScreenAlias: $"agent_{agentSlotIndex}_amplifier",
                 StepDelayMs: 120,
@@ -347,15 +341,15 @@ internal static class RuntimeScreenCapturePlan
         );
         if (includeDiskDetails)
         {
-            foreach (var (slotIndex, x, y) in DiskSlotPoints)
+            foreach (var point in profile.DiskSlotPoints)
             {
                 steps.Add(
                     new RuntimeScreenCaptureStep(
                         Role: "disk_detail",
-                        Script: Click(x, y),
+                        Script: Click(point.X, point.Y),
                         AgentSlotIndex: agentSlotIndex,
-                        SlotIndex: slotIndex,
-                        ScreenAlias: $"agent_{agentSlotIndex}_disk_{slotIndex}",
+                        SlotIndex: point.SlotIndex,
+                        ScreenAlias: $"agent_{agentSlotIndex}_disk_{point.SlotIndex}",
                         StepDelayMs: 120,
                         PostDelayMs: 700,
                         Capture: true,
@@ -368,8 +362,8 @@ internal static class RuntimeScreenCapturePlan
                         Role: string.Empty,
                         Script: "ESC",
                         AgentSlotIndex: agentSlotIndex,
-                        SlotIndex: slotIndex,
-                        ScreenAlias: $"exit_agent_{agentSlotIndex}_disk_{slotIndex}",
+                        SlotIndex: point.SlotIndex,
+                        ScreenAlias: $"exit_agent_{agentSlotIndex}_disk_{point.SlotIndex}",
                         StepDelayMs: 120,
                         PostDelayMs: 450,
                         Capture: false,

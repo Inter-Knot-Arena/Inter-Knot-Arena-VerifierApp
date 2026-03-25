@@ -60,7 +60,8 @@ public sealed class ScanOrchestrator
             var preferSoftInputLock = ScriptUsesPointerInput(scanScript) ||
                                       RuntimeScreenCapturePlan.LoadActivePlan(
                                               RuntimeScreenCaptureMode.VisibleSlice,
-                                              scanProfile
+                                              scanProfile,
+                                              LayoutProfileKind.Wide16x9
                                           )
                                           .Any(step => ScriptUsesPointerInput(step.Script));
             var scanStepDelayMs = ReadPositiveIntFromEnvironment(
@@ -183,6 +184,7 @@ public sealed class ScanOrchestrator
     )
     {
         await EnsureVisibleSliceRosterEntryAsync(ct);
+        var rosterSurface = await InspectVisibleSliceEntrySurfaceAsync(900, ct);
 
         var normalizeScript = ReadScriptFromEnvironment("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_SCRIPT", string.Empty);
         var normalizeStepDelayMs = ReadPositiveIntFromEnvironment("IKA_VISIBLE_SLICE_INITIAL_NORMALIZE_STEP_DELAY_MS", 120);
@@ -204,7 +206,8 @@ public sealed class ScanOrchestrator
             ct,
             pageIndex: 1,
             mode: RuntimeScreenCaptureMode.VisibleSlice,
-            scanProfile: scanProfile
+            scanProfile: scanProfile,
+            layoutProfile: rosterSurface.LayoutProfileKind
         );
         try
         {
@@ -235,7 +238,7 @@ public sealed class ScanOrchestrator
     {
         var initialSurface = await InspectVisibleSliceEntrySurfaceAsync(0, ct);
         AppendTrace(
-            $"full-sync initial-surface home={initialSurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={initialSurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={initialSurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={initialSurface.AspectRatio:F4} size={initialSurface.Width}x{initialSurface.Height}"
+            $"full-sync initial-surface home={initialSurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={initialSurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={initialSurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} layout_profile={initialSurface.LayoutProfileKind.ToString().ToLowerInvariant()} aspect={initialSurface.AspectRatio:F4} size={initialSurface.Width}x{initialSurface.Height}"
         );
         await EnsureVisibleSliceRosterEntryAsync(ct);
 
@@ -340,7 +343,8 @@ public sealed class ScanOrchestrator
                 ct,
                 pageIndex: pageIndex + 1,
                 mode: RuntimeScreenCaptureMode.FullRosterPage,
-                scanProfile: scanProfile
+                scanProfile: scanProfile,
+                layoutProfile: initialSurface.LayoutProfileKind
             );
             AppendTrace(
                 $"full-sync page {pageIndex + 1}: capture-complete files={runtimeCaptures.Count}"
@@ -590,10 +594,11 @@ public sealed class ScanOrchestrator
         CancellationToken ct,
         int? pageIndex = null,
         RuntimeScreenCaptureMode mode = RuntimeScreenCaptureMode.VisibleSlice,
-        RosterScanProfile scanProfile = RosterScanProfile.Fast
+        RosterScanProfile scanProfile = RosterScanProfile.Fast,
+        LayoutProfileKind layoutProfile = LayoutProfileKind.Wide16x9
     )
     {
-        var plan = RuntimeScreenCapturePlan.LoadActivePlan(mode, scanProfile);
+        var plan = RuntimeScreenCapturePlan.LoadActivePlan(mode, scanProfile, layoutProfile);
         if (plan.Count == 0)
         {
             return [];
@@ -1036,11 +1041,11 @@ public sealed class ScanOrchestrator
     {
         var entryScript = ReadScriptFromEnvironment(
             "IKA_VISIBLE_SLICE_ENTRY_SCRIPT",
-            RuntimeScreenCapturePlan.DefaultVisibleSliceEntryScript
+            string.Empty
         );
         if (string.IsNullOrWhiteSpace(entryScript))
         {
-            return;
+            entryScript = string.Empty;
         }
 
         var entryStepDelayMs = ReadPositiveIntFromEnvironment("IKA_VISIBLE_SLICE_ENTRY_STEP_DELAY_MS", 120);
@@ -1067,10 +1072,13 @@ public sealed class ScanOrchestrator
                 AppendTrace($"visible-slice-entry attempt={attempt + 1}: already-at-roster");
                 return;
             }
+            var effectiveEntryScript = string.IsNullOrWhiteSpace(entryScript)
+                ? RuntimeScreenCapturePlan.DefaultVisibleSliceEntryScript(entrySurface.LayoutProfileKind)
+                : entryScript;
             if (await TryEnterVisibleSliceRosterFromHomeAsync(
                     entrySurface,
                     attempt + 1,
-                    entryScript,
+                    effectiveEntryScript,
                     entryStepDelayMs,
                     entryPostDelayMs,
                     entryStabilizeDelayMs,
@@ -1102,7 +1110,7 @@ public sealed class ScanOrchestrator
             if (await TryEnterVisibleSliceRosterFromHomeAsync(
                     postRecoverySurface,
                     attempt + 1,
-                    entryScript,
+                    effectiveEntryScript,
                     entryStepDelayMs,
                     entryPostDelayMs,
                     entryStabilizeDelayMs,
@@ -1127,6 +1135,7 @@ public sealed class ScanOrchestrator
                 inspection.SurfaceKind == LiveSafeSurfaceKind.Home,
                 inspection.SurfaceKind == LiveSafeSurfaceKind.Roster,
                 inspection.SurfaceKind,
+                inspection.LayoutProfileKind,
                 inspection.Width,
                 inspection.Height,
                 inspection.AspectRatio,
@@ -2314,6 +2323,7 @@ internal sealed record EntrySurfaceProbe(
     bool LooksLikeHomeScreen,
     bool LooksLikeRosterScreen,
     LiveSafeSurfaceKind SurfaceKind,
+    LayoutProfileKind LayoutProfileKind,
     int Width,
     int Height,
     double AspectRatio,
