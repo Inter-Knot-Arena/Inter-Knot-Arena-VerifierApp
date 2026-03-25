@@ -189,13 +189,12 @@ public partial class MainWindow : Window
                 var fullSync = FullSyncCheckBox.IsChecked == true;
                 var locale = GetLocale();
                 var resolution = GetResolution();
-                var scanProfile = GetScanProfile();
                 var result = await orchestrator.ExecuteRosterScanAsync(
                     region,
                     fullSync,
                     locale,
                     resolution,
-                    scanProfile,
+                    RosterScanProfile.Deep,
                     ct
                 );
                 AppendStatus("SCAN_IMPORT_RESULT", $"Roster import status: {result.Status}. {result.Message}");
@@ -637,18 +636,6 @@ public partial class MainWindow : Window
         return "auto";
     }
 
-    private RosterScanProfile GetScanProfile()
-    {
-        if (ScanProfileComboBox.SelectedItem is ComboBoxItem item && item.Content is string value)
-        {
-            return value.Trim().Equals("deep", StringComparison.OrdinalIgnoreCase)
-                ? RosterScanProfile.Deep
-                : RosterScanProfile.Fast;
-        }
-
-        return RosterScanProfile.Fast;
-    }
-
     private Uri ParseApiBaseUri()
     {
         var baseUrl = ApiUrlTextBox.Text.Trim().TrimEnd('/');
@@ -875,7 +862,6 @@ public partial class MainWindow : Window
         MatchMonitorButton.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning;
         LocaleComboBox.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning && !_monitorRunning;
         ResolutionComboBox.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning && !_monitorRunning;
-        ScanProfileComboBox.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning && !_monitorRunning;
         LogoutButton.IsEnabled = _isAuthenticated && !_isBusy && !_scanRunning;
     }
 
