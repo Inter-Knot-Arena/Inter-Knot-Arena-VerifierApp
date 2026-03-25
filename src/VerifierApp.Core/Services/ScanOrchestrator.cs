@@ -249,7 +249,7 @@ public sealed class ScanOrchestrator
                 ct
             );
         }
-        if (initialUpSteps > 0 && !initialSurface.LooksLikeRosterScreen)
+        if (initialUpSteps > 0)
         {
             var resetScript = BuildRepeatedScript("UP", initialUpSteps);
             if (!string.IsNullOrWhiteSpace(resetScript))
@@ -258,15 +258,11 @@ public sealed class ScanOrchestrator
                     resetScript,
                     pageNormalizeStepDelayMs,
                     initialPostDelayMs,
-                    expectFrameChange: true,
+                    expectFrameChange: false,
                     failureContext: "full sync reset roster cursor",
                     ct
                 );
             }
-        }
-        else if (initialUpSteps > 0)
-        {
-            AppendTrace("full-sync initial cursor reset skipped because roster was already active");
         }
         if (!string.IsNullOrWhiteSpace(initialColumnNormalizeScript))
         {
