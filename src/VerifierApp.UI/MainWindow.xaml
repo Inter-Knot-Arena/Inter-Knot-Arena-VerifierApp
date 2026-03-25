@@ -375,6 +375,8 @@
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="Locale" Margin="0,0,10,0" VerticalAlignment="Center" Foreground="#D1DDF2" FontWeight="SemiBold"/>
@@ -387,6 +389,11 @@
                                             <ComboBoxItem Content="Auto"/>
                                             <ComboBoxItem Content="1080p"/>
                                             <ComboBoxItem Content="1440p"/>
+                                        </ComboBox>
+                                        <TextBlock Grid.Column="4" Text="Profile" Margin="14,0,10,0" VerticalAlignment="Center" Foreground="#D1DDF2" FontWeight="SemiBold"/>
+                                        <ComboBox x:Name="ScanProfileComboBox" Grid.Column="5" Width="104" SelectedIndex="0">
+                                            <ComboBoxItem Content="Fast"/>
+                                            <ComboBoxItem Content="Deep"/>
                                         </ComboBox>
                                     </Grid>
 

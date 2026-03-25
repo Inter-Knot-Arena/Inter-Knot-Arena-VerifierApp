@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text.Json;
+using VerifierApp.Core.Models;
 using VerifierApp.Core.Services;
 using VerifierApp.WorkerHost;
 
@@ -147,6 +148,7 @@ internal static class Program
                 fullSync: options.FullSync,
                 locale: options.Locale,
                 resolution: options.Resolution,
+                scanProfile: options.ScanProfile,
                 ct: cts.Token
             );
             scanStopwatch.Stop();
@@ -812,6 +814,7 @@ internal static class Program
         string Region,
         string Locale,
         string Resolution,
+        RosterScanProfile ScanProfile,
         bool FullSync,
         string PipeName,
         int ConnectTimeoutMs,
@@ -830,6 +833,7 @@ internal static class Program
             var region = "EU";
             var locale = "RU";
             var resolution = "auto";
+            var scanProfile = RosterScanProfile.Fast;
             var fullSync = false;
             var pipeName = $"ika_verifier_worker_{Guid.NewGuid():N}";
             var connectTimeoutMs = 15_000;
@@ -855,6 +859,9 @@ internal static class Program
                         break;
                     case "--resolution":
                         resolution = RequireValue(args, ref index, arg).Trim().ToLowerInvariant();
+                        break;
+                    case "--scan-profile":
+                        scanProfile = ParseScanProfile(RequireValue(args, ref index, arg), arg);
                         break;
                     case "--full-sync":
                         fullSync = true;
@@ -903,6 +910,7 @@ internal static class Program
                 Region: region,
                 Locale: locale,
                 Resolution: resolution,
+                ScanProfile: scanProfile,
                 FullSync: fullSync,
                 PipeName: pipeName,
                 ConnectTimeoutMs: connectTimeoutMs,
@@ -946,10 +954,22 @@ internal static class Program
             return value;
         }
 
+        private static RosterScanProfile ParseScanProfile(string value, string argumentName)
+        {
+            return value.Trim().ToLowerInvariant() switch
+            {
+                "fast" => RosterScanProfile.Fast,
+                "deep" => RosterScanProfile.Deep,
+                _ => throw new InvalidOperationException(
+                    $"{argumentName} must be one of: fast, deep."
+                )
+            };
+        }
+
         private static void PrintUsage()
         {
             Console.WriteLine(
-                "Usage: VerifierApp.LiveScan [--region EU] [--locale RU] [--resolution auto|1080p|1440p] [--full-sync] " +
+                "Usage: VerifierApp.LiveScan [--region EU] [--locale RU] [--resolution auto|1080p|1440p] [--scan-profile fast|deep] [--full-sync] " +
                 "[--out path] [--repo-root path] [--bundle-root path] [--pipe-name name] [--connect-timeout-ms 15000] " +
                 "[--worker-startup-delay-ms 1500] [--probe-script \"RIGHT,ENTER\"] " +
                 "[--probe-out-dir path] [--probe-step-delay-ms 120] [--probe-post-delay-ms 500]"

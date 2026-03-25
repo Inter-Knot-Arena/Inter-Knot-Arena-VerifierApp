@@ -38,6 +38,7 @@ public sealed class ScanOrchestrator
         bool fullSync,
         string locale,
         string resolution,
+        RosterScanProfile scanProfile,
         CancellationToken ct
     )
     {
@@ -57,7 +58,10 @@ public sealed class ScanOrchestrator
             }
             var scanScriptUsesPointerInput = ScriptUsesPointerInput(scanScript);
             var preferSoftInputLock = ScriptUsesPointerInput(scanScript) ||
-                                      RuntimeScreenCapturePlan.LoadActivePlan(RuntimeScreenCaptureMode.VisibleSlice)
+                                      RuntimeScreenCapturePlan.LoadActivePlan(
+                                              RuntimeScreenCaptureMode.VisibleSlice,
+                                              scanProfile
+                                          )
                                           .Any(step => ScriptUsesPointerInput(step.Script));
             var scanStepDelayMs = ReadPositiveIntFromEnvironment(
                 "IKA_SCAN_SCRIPT_STEP_DELAY_MS",
@@ -108,8 +112,16 @@ public sealed class ScanOrchestrator
             }
 
             var scan = fullSync
-                ? await ExecuteFullRosterScanAsync(sessionId, regionHint, locale, resolution, ct)
-                : await ExecuteVisibleSliceScanAsync(sessionId, regionHint, locale, resolution, ct);
+                ? await ExecuteFullRosterScanAsync(sessionId, regionHint, locale, resolution, scanProfile, ct)
+                : await ExecuteVisibleSliceScanAsync(sessionId, regionHint, locale, resolution, scanProfile, ct);
+
+            scan = scan with
+            {
+                ScanMeta = AppendScanMeta(
+                    scan.ScanMeta,
+                    $"verifier_scan_profile_{scanProfile.ToString().ToLowerInvariant()}"
+                )
+            };
 
             if (!string.IsNullOrWhiteSpace(scan.ErrorCode))
             {
@@ -131,10 +143,11 @@ public sealed class ScanOrchestrator
         bool fullSync,
         string locale,
         string resolution,
+        RosterScanProfile scanProfile,
         CancellationToken ct
     )
     {
-        var scan = await CaptureRosterScanAsync(regionHint, fullSync, locale, resolution, ct);
+        var scan = await CaptureRosterScanAsync(regionHint, fullSync, locale, resolution, scanProfile, ct);
         if (_apiClient is null)
         {
             throw new InvalidOperationException("Roster import client is not configured for this scan orchestrator.");
@@ -165,6 +178,7 @@ public sealed class ScanOrchestrator
         string regionHint,
         string locale,
         string resolution,
+        RosterScanProfile scanProfile,
         CancellationToken ct
     )
     {
@@ -189,7 +203,8 @@ public sealed class ScanOrchestrator
             sessionId,
             ct,
             pageIndex: 1,
-            mode: RuntimeScreenCaptureMode.VisibleSlice
+            mode: RuntimeScreenCaptureMode.VisibleSlice,
+            scanProfile: scanProfile
         );
         try
         {
@@ -214,6 +229,7 @@ public sealed class ScanOrchestrator
         string regionHint,
         string locale,
         string resolution,
+        RosterScanProfile scanProfile,
         CancellationToken ct
     )
     {
@@ -323,7 +339,8 @@ public sealed class ScanOrchestrator
                 pageSessionId,
                 ct,
                 pageIndex: pageIndex + 1,
-                mode: RuntimeScreenCaptureMode.FullRosterPage
+                mode: RuntimeScreenCaptureMode.FullRosterPage,
+                scanProfile: scanProfile
             );
             AppendTrace(
                 $"full-sync page {pageIndex + 1}: capture-complete files={runtimeCaptures.Count}"
@@ -572,10 +589,11 @@ public sealed class ScanOrchestrator
         string sessionId,
         CancellationToken ct,
         int? pageIndex = null,
-        RuntimeScreenCaptureMode mode = RuntimeScreenCaptureMode.VisibleSlice
+        RuntimeScreenCaptureMode mode = RuntimeScreenCaptureMode.VisibleSlice,
+        RosterScanProfile scanProfile = RosterScanProfile.Fast
     )
     {
-        var plan = RuntimeScreenCapturePlan.LoadActivePlan(mode);
+        var plan = RuntimeScreenCapturePlan.LoadActivePlan(mode, scanProfile);
         if (plan.Count == 0)
         {
             return [];
@@ -589,7 +607,7 @@ public sealed class ScanOrchestrator
         var rosterScreenKnownGood = mode == RuntimeScreenCaptureMode.FullRosterPage && pageIndex is > 0;
         var includesDiskDetails = plan.Any(step => string.Equals(step.Role, "disk_detail", StringComparison.OrdinalIgnoreCase));
         AppendTrace(
-            $"capture {sessionId}: policy mode={mode} steps={plan.Count} rosterProbePolicy=selection_only rosterFastPath={rosterScreenKnownGood.ToString().ToLowerInvariant()} focusCache=true diskDetails={includesDiskDetails.ToString().ToLowerInvariant()}"
+            $"capture {sessionId}: policy mode={mode} scanProfile={scanProfile.ToString().ToLowerInvariant()} steps={plan.Count} rosterProbePolicy=selection_only rosterFastPath={rosterScreenKnownGood.ToString().ToLowerInvariant()} focusCache=true diskDetails={includesDiskDetails.ToString().ToLowerInvariant()}"
         );
 
         var captures = new List<ScreenCaptureInput>();

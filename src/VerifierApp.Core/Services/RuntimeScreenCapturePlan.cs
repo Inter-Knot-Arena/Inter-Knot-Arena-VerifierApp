@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using VerifierApp.Core.Models;
 
 namespace VerifierApp.Core.Services;
 
@@ -56,7 +57,8 @@ internal static class RuntimeScreenCapturePlan
     public static string DefaultVisibleSliceEntryScript => Click(HomeAgentsIconX, HomeAgentsIconY);
 
     public static IReadOnlyList<RuntimeScreenCaptureStep> LoadActivePlan(
-        RuntimeScreenCaptureMode mode = RuntimeScreenCaptureMode.VisibleSlice
+        RuntimeScreenCaptureMode mode = RuntimeScreenCaptureMode.VisibleSlice,
+        RosterScanProfile scanProfile = RosterScanProfile.Fast
     )
     {
         var envPlan = LoadFromEnvironment(mode);
@@ -65,7 +67,7 @@ internal static class RuntimeScreenCapturePlan
             return envPlan;
         }
 
-        return LoadDefaultPreset(mode);
+        return LoadDefaultPreset(mode, scanProfile);
     }
 
     private static IReadOnlyList<RuntimeScreenCaptureStep> LoadFromEnvironment(RuntimeScreenCaptureMode mode)
@@ -99,7 +101,10 @@ internal static class RuntimeScreenCapturePlan
         }
     }
 
-    private static IReadOnlyList<RuntimeScreenCaptureStep> LoadDefaultPreset(RuntimeScreenCaptureMode mode)
+    private static IReadOnlyList<RuntimeScreenCaptureStep> LoadDefaultPreset(
+        RuntimeScreenCaptureMode mode,
+        RosterScanProfile scanProfile
+    )
     {
         var preset = Environment.GetEnvironmentVariable("IKA_DEFAULT_OCR_CAPTURE_PLAN");
         if (string.IsNullOrWhiteSpace(preset))
@@ -116,11 +121,11 @@ internal static class RuntimeScreenCapturePlan
 
         if (preset.Equals(DefaultPreset, StringComparison.OrdinalIgnoreCase))
         {
-            return CreateVisibleSliceAgentDetailPlan(mode);
+            return CreateVisibleSliceAgentDetailPlan(mode, scanProfile);
         }
         if (preset.Equals(RichEquipmentPreset, StringComparison.OrdinalIgnoreCase))
         {
-            return CreateVisibleSliceRichEquipmentPlan(mode);
+            return CreateVisibleSliceRichEquipmentPlan(mode, scanProfile);
         }
 
         return [];
@@ -188,20 +193,27 @@ internal static class RuntimeScreenCapturePlan
         };
     }
 
-    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceAgentDetailPlan(RuntimeScreenCaptureMode mode) =>
-        CreateGameplayAgentGridPlan(includeEquipment: false, mode);
+    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceAgentDetailPlan(
+        RuntimeScreenCaptureMode mode,
+        RosterScanProfile scanProfile
+    ) =>
+        CreateGameplayAgentGridPlan(includeEquipment: false, mode, scanProfile);
 
-    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceRichEquipmentPlan(RuntimeScreenCaptureMode mode) =>
-        CreateGameplayAgentGridPlan(includeEquipment: true, mode);
+    private static IReadOnlyList<RuntimeScreenCaptureStep> CreateVisibleSliceRichEquipmentPlan(
+        RuntimeScreenCaptureMode mode,
+        RosterScanProfile scanProfile
+    ) =>
+        CreateGameplayAgentGridPlan(includeEquipment: true, mode, scanProfile);
 
     private static IReadOnlyList<RuntimeScreenCaptureStep> CreateGameplayAgentGridPlan(
         bool includeEquipment,
-        RuntimeScreenCaptureMode mode
+        RuntimeScreenCaptureMode mode,
+        RosterScanProfile scanProfile
     )
     {
         var requiresVisibleSliceEntry = mode == RuntimeScreenCaptureMode.VisibleSlice;
         var exitAgentGridWhenDone = mode == RuntimeScreenCaptureMode.VisibleSlice;
-        var includeDiskDetails = ShouldIncludeDiskDetails(mode);
+        var includeDiskDetails = ShouldIncludeDiskDetails(mode, scanProfile);
         var steps = new List<RuntimeScreenCaptureStep>();
         for (var index = 0; index < VisibleAgentGridPoints.Length; index++)
         {
@@ -238,8 +250,13 @@ internal static class RuntimeScreenCapturePlan
         return steps;
     }
 
-    private static bool ShouldIncludeDiskDetails(RuntimeScreenCaptureMode mode)
+    private static bool ShouldIncludeDiskDetails(RuntimeScreenCaptureMode mode, RosterScanProfile scanProfile)
     {
+        if (scanProfile == RosterScanProfile.Deep)
+        {
+            return true;
+        }
+
         var value = Environment.GetEnvironmentVariable("IKA_INCLUDE_DISK_DETAILS");
         if (!string.IsNullOrWhiteSpace(value))
         {

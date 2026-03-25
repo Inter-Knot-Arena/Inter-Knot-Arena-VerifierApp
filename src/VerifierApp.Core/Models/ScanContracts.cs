@@ -1,5 +1,11 @@
 namespace VerifierApp.Core.Models;
 
+public enum RosterScanProfile
+{
+    Fast = 0,
+    Deep = 1,
+}
+
 public sealed record ScreenCaptureInput(
     string Role,
     string Path,
