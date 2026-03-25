@@ -262,6 +262,23 @@ internal static class LiveUiDetector
         );
     }
 
+    public static LiveSafetySurfaceInspection InspectLiveSafetySurface(string screenshotPath)
+    {
+        var layout = InspectLayout(screenshotPath);
+        var profile = InspectAgentProfileSurface(screenshotPath);
+        var surfaceKind = ResolveSafeSurfaceKind(profile);
+        var looksDangerous = surfaceKind == LiveSafeSurfaceKind.Unknown;
+        return new LiveSafetySurfaceInspection(
+            surfaceKind,
+            layout.Width,
+            layout.Height,
+            layout.AspectRatio,
+            layout.LooksLikeSupportedWideLayout,
+            looksDangerous,
+            looksDangerous ? "unknown_surface" : string.Empty
+        );
+    }
+
     private static TemplateData? LoadHomeAgentsTemplate()
     {
         lock (TemplateLock)
@@ -325,6 +342,31 @@ internal static class LiveUiDetector
         graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
         graphics.DrawImage(source, new Rectangle(0, 0, width, height), cropRect, GraphicsUnit.Pixel);
         return resized;
+    }
+
+    private static LiveSafeSurfaceKind ResolveSafeSurfaceKind(AgentProfileSurfaceInspection inspection)
+    {
+        if (inspection.LooksLikeHomeScreen)
+        {
+            return LiveSafeSurfaceKind.Home;
+        }
+
+        if (inspection.LooksLikeRosterScreen)
+        {
+            return LiveSafeSurfaceKind.Roster;
+        }
+
+        if (inspection.LooksLikeEquipmentScreen)
+        {
+            return LiveSafeSurfaceKind.Equipment;
+        }
+
+        if (inspection.LooksLikeAgentDetailScreen)
+        {
+            return LiveSafeSurfaceKind.AgentDetail;
+        }
+
+        return LiveSafeSurfaceKind.Unknown;
     }
 
     private static Rectangle FractionalRectangle(
@@ -706,4 +748,23 @@ internal sealed record LayoutInspection(
     int Height,
     double AspectRatio,
     bool LooksLikeSupportedWideLayout
+);
+
+internal enum LiveSafeSurfaceKind
+{
+    Unknown = 0,
+    Home = 1,
+    Roster = 2,
+    AgentDetail = 3,
+    Equipment = 4,
+}
+
+internal sealed record LiveSafetySurfaceInspection(
+    LiveSafeSurfaceKind SurfaceKind,
+    int Width,
+    int Height,
+    double AspectRatio,
+    bool LooksLikeSupportedWideLayout,
+    bool LooksDangerous,
+    string DangerKind
 );

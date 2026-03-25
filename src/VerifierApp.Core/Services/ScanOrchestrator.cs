@@ -55,6 +55,7 @@ public sealed class ScanOrchestrator
             {
                 scanScript = DefaultLiveEntryScript;
             }
+            var scanScriptUsesPointerInput = ScriptUsesPointerInput(scanScript);
             var preferSoftInputLock = ScriptUsesPointerInput(scanScript) ||
                                       RuntimeScreenCapturePlan.LoadActivePlan(RuntimeScreenCaptureMode.VisibleSlice)
                                           .Any(step => ScriptUsesPointerInput(step.Script));
@@ -73,13 +74,21 @@ public sealed class ScanOrchestrator
             }
 
             var shouldRunScanScript = true;
-            if (string.Equals(scanScript, DefaultLiveEntryScript, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(scanScript, DefaultLiveEntryScript, StringComparison.OrdinalIgnoreCase) ||
+                scanScriptUsesPointerInput)
             {
-            var entrySurface = await InspectVisibleSliceEntrySurfaceAsync(0, ct);
-            AppendTrace(
-                $"scan-entry-surface home={entrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={entrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={entrySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={entrySurface.AspectRatio:F4} size={entrySurface.Width}x{entrySurface.Height}"
-            );
-            shouldRunScanScript = !entrySurface.LooksLikeHomeScreen && !entrySurface.LooksLikeRosterScreen;
+                var entrySurface = await InspectVisibleSliceEntrySurfaceAsync(0, ct);
+                AppendTrace(
+                    $"scan-entry-surface surface={entrySurface.SurfaceKind.ToString().ToLowerInvariant()} danger={entrySurface.LooksDangerous.ToString().ToLowerInvariant()} danger_kind={entrySurface.DangerKind ?? "<none>"} home={entrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={entrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={entrySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={entrySurface.AspectRatio:F4} size={entrySurface.Width}x{entrySurface.Height}"
+                );
+                shouldRunScanScript = !entrySurface.LooksLikeHomeScreen && !entrySurface.LooksLikeRosterScreen;
+                if (scanScriptUsesPointerInput &&
+                    entrySurface.SurfaceKind is not LiveSafeSurfaceKind.Home and not LiveSafeSurfaceKind.Roster)
+                {
+                    throw new InvalidOperationException(
+                        $"Scan aborted: pointer-based scan entry script requires a safe home or roster surface, but the current surface is {entrySurface.SurfaceKind.ToString().ToLowerInvariant()}."
+                    );
+                }
             }
 
             if (shouldRunScanScript)
@@ -584,6 +593,7 @@ public sealed class ScanOrchestrator
         );
 
         var captures = new List<ScreenCaptureInput>();
+        var currentSafeSurfaceKind = LiveSafeSurfaceKind.Roster;
         EquipmentOverviewInspectionResult? currentEquipmentOverview = null;
         var skipNextAmplifierExit = false;
         int? skipNextDiskExitSlot = null;
@@ -617,12 +627,14 @@ public sealed class ScanOrchestrator
                     }
 
                     rosterScreenKnownGood = true;
+                    currentSafeSurfaceKind = LiveSafeSurfaceKind.Roster;
                 }
             }
             if (step.RequiresVisibleSliceEntry)
             {
                 await EnsureVisibleSliceRosterEntryAsync(ct);
                 rosterScreenKnownGood = true;
+                currentSafeSurfaceKind = LiveSafeSurfaceKind.Roster;
             }
             if (ShouldSkipUnavailableAgentSlotStep(step, unavailableAgentSlots))
             {
@@ -672,15 +684,23 @@ public sealed class ScanOrchestrator
             AppendTrace(
                 $"capture {sessionId}: step {index + 1} start role={step.Role} alias={step.ScreenAlias ?? string.Empty} agent={step.AgentSlotIndex?.ToString() ?? "na"} slot={step.SlotIndex?.ToString() ?? "na"} capture={step.Capture}"
             );
+            currentSafeSurfaceKind = await ValidateSafeSurfaceBeforeStepAsync(
+                sessionId,
+                index + 1,
+                step,
+                currentSafeSurfaceKind,
+                ct
+            );
             await ExecuteGameScriptAsync(
                 step.Script ?? string.Empty,
                 step.StepDelayMs,
                 step.PostDelayMs,
                 step.ExpectFrameChange,
-                    $"extra capture step {index + 1} ({step.Role})",
+                $"extra capture step {index + 1} ({step.Role})",
                 ct
             );
             rosterScreenKnownGood = UpdateRosterScreenStateKnownGood(step, rosterScreenKnownGood);
+            currentSafeSurfaceKind = UpdateKnownSafeSurfaceKind(step, currentSafeSurfaceKind);
             AppendTrace(
                 $"capture {sessionId}: step {index + 1} script-complete role={step.Role} alias={step.ScreenAlias ?? string.Empty}"
             );
@@ -728,7 +748,13 @@ public sealed class ScanOrchestrator
             }
             if (RequiresPostCaptureSurfaceValidation(step))
             {
-                ValidateCapturedSafeSurface(sessionId, index + 1, step, outputPath, currentEquipmentOverview);
+                currentSafeSurfaceKind = ValidateCapturedSafeSurface(
+                    sessionId,
+                    index + 1,
+                    step,
+                    outputPath,
+                    currentEquipmentOverview
+                );
             }
         }
 
@@ -839,7 +865,7 @@ public sealed class ScanOrchestrator
         string.Equals(step.Role, "agent_detail", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(step.Role, "equipment", StringComparison.OrdinalIgnoreCase);
 
-    private void ValidateCapturedSafeSurface(
+    private LiveSafeSurfaceKind ValidateCapturedSafeSurface(
         string sessionId,
         int stepNumber,
         RuntimeScreenCaptureStep step,
@@ -860,7 +886,7 @@ public sealed class ScanOrchestrator
                 );
             }
 
-            return;
+            return LiveSafeSurfaceKind.AgentDetail;
         }
 
         if (string.Equals(step.Role, "equipment", StringComparison.OrdinalIgnoreCase))
@@ -877,7 +903,11 @@ public sealed class ScanOrchestrator
                     $"Scan aborted: equipment capture for slot {step.AgentSlotIndex?.ToString() ?? "unknown"} did not land on the expected safe equipment screen."
                 );
             }
+
+            return LiveSafeSurfaceKind.Equipment;
         }
+
+        return LiveSafeSurfaceKind.Unknown;
     }
 
     private static bool ShouldSkipAmplifierDetailStep(
@@ -1045,7 +1075,7 @@ public sealed class ScanOrchestrator
             );
             var postRecoverySurface = await InspectVisibleSliceEntrySurfaceAsync(attempt + 201, ct);
             AppendTrace(
-                $"visible-slice-entry post-recovery attempt={attempt + 1}: home={postRecoverySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postRecoverySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={postRecoverySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={postRecoverySurface.AspectRatio:F4}"
+                $"visible-slice-entry post-recovery attempt={attempt + 1}: surface={postRecoverySurface.SurfaceKind.ToString().ToLowerInvariant()} danger={postRecoverySurface.LooksDangerous.ToString().ToLowerInvariant()} home={postRecoverySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postRecoverySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={postRecoverySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={postRecoverySurface.AspectRatio:F4}"
             );
             if (postRecoverySurface.LooksLikeRosterScreen)
             {
@@ -1074,14 +1104,17 @@ public sealed class ScanOrchestrator
         var stateProbePath = await CaptureVisibleSliceStateProbeAsync(attempt, ct);
         try
         {
-            var layout = LiveUiDetector.InspectLayout(stateProbePath);
+            var inspection = LiveUiDetector.InspectLiveSafetySurface(stateProbePath);
             return new EntrySurfaceProbe(
-                LiveUiDetector.LooksLikeHomeScreen(stateProbePath),
-                LiveUiDetector.LooksLikeAgentRosterScreen(stateProbePath),
-                layout.Width,
-                layout.Height,
-                layout.AspectRatio,
-                layout.LooksLikeSupportedWideLayout
+                inspection.SurfaceKind == LiveSafeSurfaceKind.Home,
+                inspection.SurfaceKind == LiveSafeSurfaceKind.Roster,
+                inspection.SurfaceKind,
+                inspection.Width,
+                inspection.Height,
+                inspection.AspectRatio,
+                inspection.LooksLikeSupportedWideLayout,
+                inspection.LooksDangerous,
+                inspection.DangerKind
             );
         }
         finally
@@ -1114,7 +1147,7 @@ public sealed class ScanOrchestrator
         CancellationToken ct
     )
     {
-        if (!surface.LooksLikeHomeScreen ||
+        if (surface.SurfaceKind != LiveSafeSurfaceKind.Home ||
             !await TryExecuteGameScriptAsync(entryScript, entryStepDelayMs, entryPostDelayMs, expectFrameChange: true, ct))
         {
             return false;
@@ -1127,9 +1160,48 @@ public sealed class ScanOrchestrator
 
         var postEntrySurface = await InspectVisibleSliceEntrySurfaceAsync(attempt + 101, ct);
         AppendTrace(
-            $"visible-slice-entry post-entry attempt={attempt}: home={postEntrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postEntrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={postEntrySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={postEntrySurface.AspectRatio:F4}"
+            $"visible-slice-entry post-entry attempt={attempt}: surface={postEntrySurface.SurfaceKind.ToString().ToLowerInvariant()} danger={postEntrySurface.LooksDangerous.ToString().ToLowerInvariant()} home={postEntrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postEntrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={postEntrySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={postEntrySurface.AspectRatio:F4}"
         );
         return postEntrySurface.LooksLikeRosterScreen;
+    }
+
+    private async Task<LiveSafeSurfaceKind> ValidateSafeSurfaceBeforeStepAsync(
+        string sessionId,
+        int stepNumber,
+        RuntimeScreenCaptureStep step,
+        LiveSafeSurfaceKind currentSafeSurfaceKind,
+        CancellationToken ct
+    )
+    {
+        if (!ScriptUsesPointerInput(step.Script) || step.ExpectedSurfaceKind == LiveSafeSurfaceKind.Unknown)
+        {
+            return currentSafeSurfaceKind;
+        }
+
+        if (currentSafeSurfaceKind == step.ExpectedSurfaceKind)
+        {
+            return currentSafeSurfaceKind;
+        }
+
+        var probe = await InspectVisibleSliceEntrySurfaceAsync(stepNumber + 3000, ct);
+        AppendTrace(
+            $"capture {sessionId}: step {stepNumber} pre-click-surface expected={step.ExpectedSurfaceKind.ToString().ToLowerInvariant()} current={currentSafeSurfaceKind.ToString().ToLowerInvariant()} observed={probe.SurfaceKind.ToString().ToLowerInvariant()} danger={probe.LooksDangerous.ToString().ToLowerInvariant()} danger_kind={probe.DangerKind ?? "<none>"}"
+        );
+        if (!probe.LooksLikeSupportedWideLayout)
+        {
+            throw new InvalidOperationException(
+                $"Scan aborted: pre-click safety probe for step {stepNumber} is outside the supported wide-layout family ({probe.Width}x{probe.Height}, aspect {probe.AspectRatio:F4})."
+            );
+        }
+
+        if (probe.LooksDangerous || probe.SurfaceKind != step.ExpectedSurfaceKind)
+        {
+            throw new InvalidOperationException(
+                $"Scan aborted: pre-click safety guard expected {step.ExpectedSurfaceKind.ToString().ToLowerInvariant()} before step {stepNumber}, but observed {probe.SurfaceKind.ToString().ToLowerInvariant()}."
+            );
+        }
+
+        return probe.SurfaceKind;
     }
 
     private async Task ExecuteGameScriptAsync(
@@ -1300,6 +1372,31 @@ public sealed class ScanOrchestrator
                script.Contains("WHEELDOWN", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static LiveSafeSurfaceKind UpdateKnownSafeSurfaceKind(
+        RuntimeScreenCaptureStep step,
+        LiveSafeSurfaceKind currentSafeSurfaceKind
+    )
+    {
+        if (RestoresRosterScreen(step))
+        {
+            return LiveSafeSurfaceKind.Roster;
+        }
+
+        if (RestoresEquipmentScreen(step))
+        {
+            return LiveSafeSurfaceKind.Equipment;
+        }
+
+        if (LeavesRosterScreen(step) ||
+            string.Equals(step.Role, "equipment", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(step.Role, "agent_detail", StringComparison.OrdinalIgnoreCase))
+        {
+            return LiveSafeSurfaceKind.Unknown;
+        }
+
+        return currentSafeSurfaceKind;
+    }
+
     private static bool RequiresRosterScreen(RuntimeScreenCaptureStep step)
     {
         return IsRosterSelectionStep(step);
@@ -1332,6 +1429,15 @@ public sealed class ScanOrchestrator
         return string.IsNullOrWhiteSpace(step.Role) &&
                !string.IsNullOrWhiteSpace(step.ScreenAlias) &&
                step.ScreenAlias.StartsWith("return_to_agent_grid_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool RestoresEquipmentScreen(RuntimeScreenCaptureStep step)
+    {
+        return string.IsNullOrWhiteSpace(step.Role) &&
+               (
+                   step.ScreenAlias?.Contains("_amplifier", StringComparison.OrdinalIgnoreCase) == true ||
+                   step.ScreenAlias?.Contains("_disk_", StringComparison.OrdinalIgnoreCase) == true
+               );
     }
 
     private static bool LeavesRosterScreen(RuntimeScreenCaptureStep step)
@@ -2189,8 +2295,11 @@ public sealed class ScanOrchestrator
 internal sealed record EntrySurfaceProbe(
     bool LooksLikeHomeScreen,
     bool LooksLikeRosterScreen,
+    LiveSafeSurfaceKind SurfaceKind,
     int Width,
     int Height,
     double AspectRatio,
-    bool LooksLikeSupportedWideLayout
+    bool LooksLikeSupportedWideLayout,
+    bool LooksDangerous,
+    string DangerKind
 );

@@ -14,7 +14,8 @@ internal sealed record RuntimeScreenCaptureStep(
     int PostDelayMs = 350,
     bool Capture = true,
     bool ExpectFrameChange = true,
-    bool RequiresVisibleSliceEntry = false
+    bool RequiresVisibleSliceEntry = false,
+    LiveSafeSurfaceKind ExpectedSurfaceKind = LiveSafeSurfaceKind.Unknown
 );
 
 internal enum RuntimeScreenCaptureMode
@@ -266,7 +267,8 @@ internal static class RuntimeScreenCapturePlan
             PostDelayMs: 650,
             Capture: false,
             ExpectFrameChange: true,
-            RequiresVisibleSliceEntry: requiresVisibleSliceEntry
+            RequiresVisibleSliceEntry: requiresVisibleSliceEntry,
+            ExpectedSurfaceKind: LiveSafeSurfaceKind.Roster
         );
 
     private static RuntimeScreenCaptureStep CreateAgentDetailCapture(int agentSlotIndex, bool requiresVisibleSliceEntry = false) =>
@@ -297,7 +299,8 @@ internal static class RuntimeScreenCapturePlan
                 StepDelayMs: 120,
                 PostDelayMs: 650,
                 Capture: true,
-                ExpectFrameChange: true
+                ExpectFrameChange: true,
+                ExpectedSurfaceKind: LiveSafeSurfaceKind.AgentDetail
             )
         );
         steps.Add(
@@ -309,7 +312,8 @@ internal static class RuntimeScreenCapturePlan
                 StepDelayMs: 120,
                 PostDelayMs: 650,
                 Capture: true,
-                ExpectFrameChange: true
+                ExpectFrameChange: true,
+                ExpectedSurfaceKind: LiveSafeSurfaceKind.Equipment
             )
         );
         steps.Add(
@@ -338,7 +342,8 @@ internal static class RuntimeScreenCapturePlan
                         StepDelayMs: 120,
                         PostDelayMs: 700,
                         Capture: true,
-                        ExpectFrameChange: true
+                        ExpectFrameChange: true,
+                        ExpectedSurfaceKind: LiveSafeSurfaceKind.Equipment
                     )
                 );
                 steps.Add(
