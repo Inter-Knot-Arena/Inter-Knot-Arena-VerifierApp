@@ -30,8 +30,10 @@ internal static class Program
             EnsureProcessEnvironmentDefault("IKA_ALLOW_SOFT_INPUT_LOCK", "1");
             EnsureProcessEnvironmentDefault("IKA_DEFAULT_OCR_CAPTURE_PLAN", "VISIBLE_SLICE_AGENT_DETAIL_EQUIPMENT_AMP_BETA");
             EnsureProcessEnvironmentDefault("IKA_KEY_SCRIPT_BACKEND", "native");
+            WriteDiagnostic("boot-env-ready");
             var bundleSidecarRoot = ResolveBundledSidecarRoot(options.BundleRoot, options.RepoRoot);
             var repoRoot = bundleSidecarRoot is null ? ResolveRepoRoot(options.RepoRoot) : null;
+            WriteDiagnostic($"boot-paths bundleSidecarRoot={bundleSidecarRoot ?? "<null>"} repoRoot={repoRoot ?? "<null>"}");
             BundledAssetPaths? bundledAssets = null;
             var nativeDll = string.Empty;
             WorkerLaunch workerLaunch;
@@ -40,10 +42,12 @@ internal static class Program
 
             if (!string.IsNullOrWhiteSpace(bundleSidecarRoot))
             {
+                WriteDiagnostic("boot-bundle-extract-start");
                 bundledAssets = BundledAssetManager.EnsureExtracted(
                     Assembly.GetExecutingAssembly(),
                     bundleSidecarRoot
                 );
+                WriteDiagnostic($"boot-bundle-extract-complete root={bundledAssets.RootPath}");
                 nativeDll = bundledAssets.NativeDllPath;
                 workerLaunch = new WorkerLaunch(
                     bundledAssets.WorkerExePath,
@@ -55,6 +59,7 @@ internal static class Program
             }
             else
             {
+                WriteDiagnostic("boot-repo-resolve-start");
                 nativeDll = ResolveNativeDll(repoRoot!);
                 workerLaunch = ResolveWorkerLaunch(repoRoot!);
                 ocrRoot = ResolveOptionalDirectory(
@@ -67,14 +72,19 @@ internal static class Program
                     Path.Combine(Path.GetDirectoryName(repoRoot!) ?? repoRoot!, "Inter-Knot Arena CV"),
                     Path.Combine(repoRoot!, "external", "CV")
                 );
+                WriteDiagnostic("boot-repo-resolve-complete");
             }
 
             PrependDirectoryToPath(Path.GetDirectoryName(nativeDll));
+            WriteDiagnostic($"boot-native-bootstrap-start dll={nativeDll}");
             NativeLibraryBootstrap.Initialize(nativeDll);
+            WriteDiagnostic("boot-native-bootstrap-complete");
             var nativeBridge = new NativeBridge();
+            WriteDiagnostic("boot-native-bridge-ready");
 
             if (!string.IsNullOrWhiteSpace(options.ProbeScript))
             {
+                WriteDiagnostic("boot-probe-start");
                 return await RunProbeAsync(options, cts.Token);
             }
 
@@ -186,6 +196,13 @@ internal static class Program
         }
 
         var formatted = $"[live-scan] {message}";
+        TryAppendDiagnosticTrace(formatted);
+
+        if (!ReadBooleanFlagFromEnvironment("IKA_LIVE_SCAN_WRITE_CONSOLE_DIAGNOSTICS", false))
+        {
+            return;
+        }
+
         try
         {
             Console.Error.WriteLine(formatted);
@@ -194,8 +211,6 @@ internal static class Program
         {
             // ignored
         }
-
-        TryAppendDiagnosticTrace(formatted);
     }
 
     private static void TryAppendDiagnosticTrace(string message)
@@ -242,17 +257,23 @@ internal static class Program
 
     private static async Task<int> RunProbeAsync(Options options, CancellationToken ct)
     {
+        WriteDiagnostic("probe-enter");
         var nativeBridge = new NativeBridge();
         var status = nativeBridge.InspectGameWindowStatus();
+        WriteDiagnostic(
+            $"probe-window-status canInject={status.CanInjectInput.ToString().ToLowerInvariant()} blocking={status.BlockingIssue ?? "<null>"} elevated={status.CurrentProcessElevated.ToString().ToLowerInvariant()}"
+        );
         if (!status.CanInjectInput)
         {
             throw new InvalidOperationException(FormatGameWindowStatusFailure(status));
         }
 
+        WriteDiagnostic("probe-focus-start");
         if (!nativeBridge.TryFocusGameWindow())
         {
             throw new InvalidOperationException("Could not focus game window for probe.");
         }
+        WriteDiagnostic("probe-focus-complete");
 
         if (options.WorkerStartupDelayMs > 0)
         {
@@ -268,21 +289,27 @@ internal static class Program
 
         var beforePath = Path.Combine(probeRoot, "before.png");
         var afterPath = Path.Combine(probeRoot, "after.png");
+        WriteDiagnostic($"probe-capture-before-start path={beforePath}");
         if (!nativeBridge.CaptureGameWindowPng(beforePath))
         {
             throw new InvalidOperationException("Failed to capture pre-probe game window.");
         }
+        WriteDiagnostic("probe-capture-before-complete");
 
+        WriteDiagnostic($"probe-script-start script={options.ProbeScript}");
         var scriptExecuted = nativeBridge.ExecuteScanScript(options.ProbeScript!, options.ProbeStepDelayMs);
+        WriteDiagnostic($"probe-script-complete executed={scriptExecuted.ToString().ToLowerInvariant()}");
         if (options.ProbePostDelayMs > 0)
         {
             await Task.Delay(options.ProbePostDelayMs, ct);
         }
 
+        WriteDiagnostic($"probe-capture-after-start path={afterPath}");
         if (!nativeBridge.CaptureGameWindowPng(afterPath))
         {
             throw new InvalidOperationException("Failed to capture post-probe game window.");
         }
+        WriteDiagnostic("probe-capture-after-complete");
 
         var payload = new
         {
@@ -305,6 +332,7 @@ internal static class Program
             await File.WriteAllTextAsync(outputPath, json + Environment.NewLine, ct);
         }
 
+        WriteDiagnostic("probe-complete");
         Console.WriteLine(json);
         return scriptExecuted ? 0 : 2;
     }
@@ -762,6 +790,22 @@ internal static class Program
         {
             Environment.SetEnvironmentVariable(name, value);
         }
+    }
+
+    private static bool ReadBooleanFlagFromEnvironment(string envVar, bool fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(envVar);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return fallback;
+        }
+
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+            _ => fallback,
+        };
     }
 
     private sealed record Options(
