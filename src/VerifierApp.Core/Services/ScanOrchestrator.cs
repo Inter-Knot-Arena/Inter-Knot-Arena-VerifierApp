@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using VerifierApp.Core.Models;
 
@@ -216,6 +217,7 @@ public sealed class ScanOrchestrator
         var maxPages = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_MAX_PAGES", 64);
         var maxStalledPages = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_MAX_STALLED_PAGES", 3);
         var expectedAgentCount = ReadNonNegativeIntFromEnvironment("IKA_EXPECTED_AGENT_COUNT", 20);
+        var maxWallMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_MAX_WALL_MS", 300_000);
         var initialPageResetSteps = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_INITIAL_PAGE_RESET_STEPS", 16);
         var initialPageResetScript = ReadScriptFromEnvironment(
             "IKA_FULL_SYNC_INITIAL_PAGE_RESET_SCRIPT",
@@ -291,10 +293,18 @@ public sealed class ScanOrchestrator
         var stalledPages = 0;
         var reachedTerminalSlice = false;
         var scannedPages = 0;
+        var fullSyncStopwatch = Stopwatch.StartNew();
 
         for (var pageIndex = 0; pageIndex < maxPages; pageIndex++)
         {
             ct.ThrowIfCancellationRequested();
+            if (maxWallMs > 0 && fullSyncStopwatch.ElapsedMilliseconds > maxWallMs)
+            {
+                AppendTrace($"full-sync budget-exceeded before page {pageIndex + 1}: wallMs={fullSyncStopwatch.ElapsedMilliseconds}");
+                throw new InvalidOperationException(
+                    $"Scan aborted: full sync exceeded the time budget of {maxWallMs} ms."
+                );
+            }
 
             var pageSessionId = $"{sessionId}-page-{pageIndex + 1:D2}";
             AppendTrace(
@@ -345,6 +355,13 @@ public sealed class ScanOrchestrator
             {
                 throw new InvalidOperationException(
                     $"Scan aborted [{pageScan.ErrorCode}]: {pageScan.ErrorMessage ?? "worker scan failure"}."
+                );
+            }
+            if (maxWallMs > 0 && fullSyncStopwatch.ElapsedMilliseconds > maxWallMs)
+            {
+                AppendTrace($"full-sync budget-exceeded after page {pageIndex + 1}: wallMs={fullSyncStopwatch.ElapsedMilliseconds}");
+                throw new InvalidOperationException(
+                    $"Scan aborted: full sync exceeded the time budget of {maxWallMs} ms."
                 );
             }
 
