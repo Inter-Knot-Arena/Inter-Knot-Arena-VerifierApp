@@ -175,17 +175,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (TryRelaunchElevatedForGame(out var elevationError))
-        {
-            Application.Current.Shutdown();
-            return;
-        }
-        if (!string.IsNullOrWhiteSpace(elevationError))
-        {
-            AppendStatus("SCAN_ELEVATION_REQUIRED", elevationError);
-            return;
-        }
-
         _scanRunning = true;
         RecomputeState();
         try
@@ -234,17 +223,6 @@ public partial class MainWindow : Window
             RecomputeState();
             MatchMonitorButton.Content = "Start Match Monitor";
             AppendStatus("MONITOR_STOPPED", "Match monitor stopped.");
-            return;
-        }
-
-        if (TryRelaunchElevatedForGame(out var monitorElevationError))
-        {
-            Application.Current.Shutdown();
-            return;
-        }
-        if (!string.IsNullOrWhiteSpace(monitorElevationError))
-        {
-            AppendStatus("MONITOR_ELEVATION_REQUIRED", monitorElevationError);
             return;
         }
 
@@ -601,22 +579,6 @@ public partial class MainWindow : Window
             }
         }
         _workerLauncher.Dispose();
-    }
-
-    private bool TryRelaunchElevatedForGame(out string? errorMessage)
-    {
-        var executablePath = Environment.ProcessPath ??
-                             Process.GetCurrentProcess().MainModule?.FileName ??
-                             string.Empty;
-        var outcome = ElevationRelaunchHelper.TryRelaunchIfGameRequiresElevation(
-            new NativeBridge(),
-            executablePath,
-            Environment.GetCommandLineArgs().Skip(1),
-            out errorMessage,
-            out _,
-            waitForExit: false
-        );
-        return outcome == ElevationRelaunchOutcome.Relaunched;
     }
 
     private async Task<VerifierTokens> ResolveUserIdAsync(VerifierTokens tokens, CancellationToken ct)
