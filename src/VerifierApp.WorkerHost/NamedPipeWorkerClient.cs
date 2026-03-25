@@ -39,6 +39,9 @@ public sealed class NamedPipeWorkerClient : IWorkerClient, IAsyncDisposable
     public Task<EquipmentOverviewInspectionResult> InspectEquipmentOverviewAsync(string imagePath, CancellationToken ct) =>
         SendAsync<EquipmentOverviewInspectionResult>("ocr.inspectEquipmentOverview", new { path = imagePath }, ct);
 
+    public Task<DangerSurfaceInspectionResult> InspectDangerSurfaceAsync(string imagePath, CancellationToken ct) =>
+        SendAsync<DangerSurfaceInspectionResult>("ocr.inspectDangerSurface", new { path = imagePath }, ct);
+
     public Task<DetectionResult> RunPrecheckAsync(
         string matchId,
         string? frameHashHint,
@@ -152,6 +155,7 @@ public sealed class NamedPipeWorkerClient : IWorkerClient, IAsyncDisposable
         {
             "health" => ReadPositiveIntFromEnvironment("IKA_WORKER_HEALTH_TIMEOUT_MS", 30_000),
             "ocr.inspectEquipmentOverview" => ReadPositiveIntFromEnvironment("IKA_WORKER_EQUIPMENT_TIMEOUT_MS", 15_000),
+            "ocr.inspectDangerSurface" => ReadPositiveIntFromEnvironment("IKA_WORKER_DANGER_TIMEOUT_MS", 15_000),
             "ocr.scan" => ReadPositiveIntFromEnvironment("IKA_WORKER_SCAN_TIMEOUT_MS", 60_000),
             _ => ReadPositiveIntFromEnvironment("IKA_WORKER_REQUEST_TIMEOUT_MS", 30_000),
         };

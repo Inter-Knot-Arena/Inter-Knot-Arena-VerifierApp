@@ -13,6 +13,7 @@ internal sealed record RuntimeScreenCaptureStep(
     int? PageIndex = null,
     int StepDelayMs = 120,
     int PostDelayMs = 350,
+    int MinPostChangeSettleMs = 0,
     bool Capture = true,
     bool ExpectFrameChange = true,
     bool RequiresVisibleSliceEntry = false,
@@ -270,7 +271,8 @@ internal static class RuntimeScreenCapturePlan
             AgentSlotIndex: agentSlotIndex,
             ScreenAlias: $"select_agent_{agentSlotIndex}",
             StepDelayMs: 120,
-            PostDelayMs: 650,
+            PostDelayMs: 450,
+            MinPostChangeSettleMs: 260,
             Capture: false,
             ExpectFrameChange: true,
             RequiresVisibleSliceEntry: requiresVisibleSliceEntry,
@@ -288,10 +290,12 @@ internal static class RuntimeScreenCapturePlan
             AgentSlotIndex: agentSlotIndex,
             ScreenAlias: $"agent_{agentSlotIndex}_detail",
             StepDelayMs: 120,
-            PostDelayMs: 850,
+            PostDelayMs: 550,
+            MinPostChangeSettleMs: 320,
             Capture: true,
             ExpectFrameChange: true,
-            RequiresVisibleSliceEntry: requiresVisibleSliceEntry
+            RequiresVisibleSliceEntry: requiresVisibleSliceEntry,
+            ExpectedSurfaceKind: LiveSafeSurfaceKind.Roster
         );
 
     private static void AddEquipmentFlow(
@@ -308,7 +312,8 @@ internal static class RuntimeScreenCapturePlan
                 AgentSlotIndex: agentSlotIndex,
                 ScreenAlias: $"agent_{agentSlotIndex}_equipment",
                 StepDelayMs: 120,
-                PostDelayMs: 650,
+                PostDelayMs: 420,
+                MinPostChangeSettleMs: 220,
                 Capture: true,
                 ExpectFrameChange: true,
                 ExpectedSurfaceKind: LiveSafeSurfaceKind.AgentDetail
@@ -321,7 +326,8 @@ internal static class RuntimeScreenCapturePlan
                 AgentSlotIndex: agentSlotIndex,
                 ScreenAlias: $"agent_{agentSlotIndex}_amplifier",
                 StepDelayMs: 120,
-                PostDelayMs: 650,
+                PostDelayMs: 420,
+                MinPostChangeSettleMs: 220,
                 Capture: true,
                 ExpectFrameChange: true,
                 ExpectedSurfaceKind: LiveSafeSurfaceKind.Equipment
@@ -334,7 +340,8 @@ internal static class RuntimeScreenCapturePlan
                 AgentSlotIndex: agentSlotIndex,
                 ScreenAlias: $"exit_agent_{agentSlotIndex}_amplifier",
                 StepDelayMs: 120,
-                PostDelayMs: 220,
+                PostDelayMs: 200,
+                MinPostChangeSettleMs: 120,
                 Capture: false,
                 ExpectFrameChange: true
             )
@@ -351,7 +358,8 @@ internal static class RuntimeScreenCapturePlan
                         SlotIndex: point.SlotIndex,
                         ScreenAlias: $"agent_{agentSlotIndex}_disk_{point.SlotIndex}",
                         StepDelayMs: 120,
-                        PostDelayMs: 700,
+                        PostDelayMs: 420,
+                        MinPostChangeSettleMs: 220,
                         Capture: true,
                         ExpectFrameChange: true,
                         ExpectedSurfaceKind: LiveSafeSurfaceKind.Equipment
@@ -365,7 +373,8 @@ internal static class RuntimeScreenCapturePlan
                         SlotIndex: point.SlotIndex,
                         ScreenAlias: $"exit_agent_{agentSlotIndex}_disk_{point.SlotIndex}",
                         StepDelayMs: 120,
-                        PostDelayMs: 450,
+                        PostDelayMs: 200,
+                        MinPostChangeSettleMs: 120,
                         Capture: false,
                         ExpectFrameChange: true
                     )
@@ -384,7 +393,8 @@ internal static class RuntimeScreenCapturePlan
                 AgentSlotIndex: agentSlotIndex,
                 ScreenAlias: $"return_to_agent_grid_{agentSlotIndex}",
                 StepDelayMs: 120,
-                PostDelayMs: 220,
+                PostDelayMs: 200,
+                MinPostChangeSettleMs: 120,
                 Capture: false,
                 ExpectFrameChange: true
             )

@@ -73,6 +73,7 @@ _prepend_runtime_dependency_dirs()
 
 from detectors import (
     get_worker_health_details,
+    inspect_danger_surface,
     inspect_equipment_overview,
     run_inrun,
     run_ocr_scan,
@@ -110,6 +111,8 @@ def dispatch(method: str, payload: Dict[str, Any]) -> Any:
         return run_ocr_scan(payload)
     if method == "ocr.inspectEquipmentOverview":
         return inspect_equipment_overview(payload)
+    if method == "ocr.inspectDangerSurface":
+        return inspect_danger_surface(payload)
     if method == "cv.precheck":
         return run_precheck(payload)
     if method == "cv.inrun":

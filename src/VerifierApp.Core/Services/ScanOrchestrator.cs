@@ -86,6 +86,12 @@ public sealed class ScanOrchestrator
                 AppendTrace(
                     $"scan-entry-surface surface={entrySurface.SurfaceKind.ToString().ToLowerInvariant()} danger={entrySurface.LooksDangerous.ToString().ToLowerInvariant()} danger_kind={entrySurface.DangerKind ?? "<none>"} home={entrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={entrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={entrySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={entrySurface.AspectRatio:F4} size={entrySurface.Width}x{entrySurface.Height}"
                 );
+                if (IsExplicitDangerKind(entrySurface.DangerKind))
+                {
+                    throw new InvalidOperationException(
+                        $"Scan aborted: detected dangerous live surface '{entrySurface.DangerKind}' before entry automation."
+                    );
+                }
                 shouldRunScanScript = !entrySurface.LooksLikeHomeScreen && !entrySurface.LooksLikeRosterScreen;
                 if (scanScriptUsesPointerInput &&
                     entrySurface.SurfaceKind is not LiveSafeSurfaceKind.Home and not LiveSafeSurfaceKind.Roster)
@@ -102,6 +108,7 @@ public sealed class ScanOrchestrator
                     scanScript,
                     scanStepDelayMs,
                     scanPostDelayMs,
+                    0,
                     expectFrameChange: true,
                     failureContext: "native scan automation script",
                     ct
@@ -195,6 +202,7 @@ public sealed class ScanOrchestrator
                 normalizeScript,
                 normalizeStepDelayMs,
                 normalizePostDelayMs,
+                140,
                 expectFrameChange: true,
                 failureContext: "visible slice normalize roster cursor",
                 ct
@@ -253,20 +261,20 @@ public sealed class ScanOrchestrator
         );
         var initialPageResetPostDelayMs = ReadNonNegativeIntFromEnvironment(
             "IKA_FULL_SYNC_INITIAL_PAGE_RESET_POST_DELAY_MS",
-            750
+            520
         );
         var initialUpSteps = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_INITIAL_UP_STEPS", 24);
-        var initialPostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_INITIAL_POST_DELAY_MS", 400);
+        var initialPostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_INITIAL_POST_DELAY_MS", 220);
         var initialColumnNormalizeScript = ReadScriptFromEnvironment(
             "IKA_FULL_SYNC_INITIAL_COLUMN_NORMALIZE_SCRIPT",
             "LEFT,LEFT"
         );
         var pageAdvanceScript = ReadScriptFromEnvironment("IKA_FULL_SYNC_PAGE_ADVANCE_SCRIPT", "WHEEL:-120");
         var pageAdvanceStepDelayMs = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_PAGE_ADVANCE_STEP_DELAY_MS", 120);
-        var pageAdvancePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_PAGE_ADVANCE_POST_DELAY_MS", 650);
+        var pageAdvancePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_PAGE_ADVANCE_POST_DELAY_MS", 420);
         var pageNormalizeScript = ReadScriptFromEnvironment("IKA_FULL_SYNC_PAGE_NORMALIZE_SCRIPT", "LEFT,LEFT");
         var pageNormalizeStepDelayMs = ReadPositiveIntFromEnvironment("IKA_FULL_SYNC_PAGE_NORMALIZE_STEP_DELAY_MS", 120);
-        var pageNormalizePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_PAGE_NORMALIZE_POST_DELAY_MS", 220);
+        var pageNormalizePostDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FULL_SYNC_PAGE_NORMALIZE_POST_DELAY_MS", 160);
 
         if (!string.IsNullOrWhiteSpace(initialPageResetScript))
         {
@@ -274,6 +282,7 @@ public sealed class ScanOrchestrator
                 initialPageResetScript,
                 pageAdvanceStepDelayMs,
                 initialPageResetPostDelayMs,
+                0,
                 expectFrameChange: false,
                 failureContext: "full sync reset roster scroll before page 1",
                 ct
@@ -288,6 +297,7 @@ public sealed class ScanOrchestrator
                     resetScript,
                     pageNormalizeStepDelayMs,
                     initialPostDelayMs,
+                    0,
                     expectFrameChange: false,
                     failureContext: "full sync reset roster cursor",
                     ct
@@ -300,6 +310,7 @@ public sealed class ScanOrchestrator
                 initialColumnNormalizeScript,
                 pageNormalizeStepDelayMs,
                 pageNormalizePostDelayMs,
+                0,
                 expectFrameChange: false,
                 failureContext: "full sync normalize roster cursor column before page 1",
                 ct
@@ -468,6 +479,7 @@ public sealed class ScanOrchestrator
                     pageNormalizeScript,
                     pageNormalizeStepDelayMs,
                     pageNormalizePostDelayMs,
+                    140,
                     expectFrameChange: true,
                     failureContext: $"full sync normalize roster cursor before advancing from page {pageIndex + 1}",
                     ct
@@ -477,6 +489,7 @@ public sealed class ScanOrchestrator
                 pageAdvanceScript,
                 pageAdvanceStepDelayMs,
                 pageAdvancePostDelayMs,
+                220,
                 expectFrameChange: true,
                 failureContext: $"full sync advance after page {pageIndex + 1}",
                 ct
@@ -718,6 +731,7 @@ public sealed class ScanOrchestrator
                 step.Script ?? string.Empty,
                 step.StepDelayMs,
                 step.PostDelayMs,
+                step.MinPostChangeSettleMs,
                 step.ExpectFrameChange,
                 $"extra capture step {index + 1} ({step.Role})",
                 ct
@@ -771,13 +785,65 @@ public sealed class ScanOrchestrator
             }
             if (RequiresPostCaptureSurfaceValidation(step))
             {
-                currentSafeSurfaceKind = ValidateCapturedSafeSurface(
-                    sessionId,
-                    index + 1,
-                    step,
-                    outputPath,
-                    currentEquipmentOverview
-                );
+                try
+                {
+                    currentSafeSurfaceKind = ValidateCapturedSafeSurface(
+                        sessionId,
+                        index + 1,
+                        step,
+                        outputPath,
+                        currentEquipmentOverview
+                    );
+                }
+                catch (InvalidOperationException) when (CanRetryCapturedSafeSurface(step))
+                {
+                    var retryDelayMs = ReadNonNegativeIntFromEnvironment(
+                        "IKA_CAPTURE_SURFACE_RETRY_DELAY_MS",
+                        260
+                    );
+                    AppendTrace(
+                        $"capture {sessionId}: step {index + 1} surface-retry alias={step.ScreenAlias ?? string.Empty} role={step.Role} delayMs={retryDelayMs}"
+                    );
+                    if (retryDelayMs > 0)
+                    {
+                        await Task.Delay(retryDelayMs, ct);
+                    }
+                    if (string.Equals(step.Role, "agent_detail", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await ExecuteGameScriptAsync(
+                            step.Script ?? string.Empty,
+                            step.StepDelayMs,
+                            step.PostDelayMs,
+                            step.MinPostChangeSettleMs,
+                            step.ExpectFrameChange,
+                            $"surface retry step {index + 1} ({step.Role})",
+                            ct
+                        );
+                    }
+                    if (!await TryCaptureRuntimePngWithRetriesAsync(outputPath, ct))
+                    {
+                        throw new InvalidOperationException(
+                            $"Scan aborted: retry capture failed for step {index + 1} ({step.Role})."
+                        );
+                    }
+                    AppendTrace(
+                        $"capture {sessionId}: step {index + 1} surface-retry-png={Path.GetFileName(outputPath)}"
+                    );
+                    if (string.Equals(step.Role, "equipment", StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentEquipmentOverview = await TryInspectEquipmentOverviewAsync(outputPath, ct);
+                        AppendTrace(
+                            $"capture {sessionId}: equipment-inspection-retry weaponPresent={(currentEquipmentOverview?.WeaponPresent?.ToString() ?? "null")} discs={(currentEquipmentOverview?.DiscSlotOccupancy?.Count ?? 0)}"
+                        );
+                    }
+                    currentSafeSurfaceKind = ValidateCapturedSafeSurface(
+                        sessionId,
+                        index + 1,
+                        step,
+                        outputPath,
+                        currentEquipmentOverview
+                    );
+                }
             }
         }
 
@@ -887,6 +953,9 @@ public sealed class ScanOrchestrator
     private static bool RequiresPostCaptureSurfaceValidation(RuntimeScreenCaptureStep step) =>
         string.Equals(step.Role, "agent_detail", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(step.Role, "equipment", StringComparison.OrdinalIgnoreCase);
+
+    private static bool CanRetryCapturedSafeSurface(RuntimeScreenCaptureStep step) =>
+        RequiresPostCaptureSurfaceValidation(step);
 
     private LiveSafeSurfaceKind ValidateCapturedSafeSurface(
         string sessionId,
@@ -1067,6 +1136,12 @@ public sealed class ScanOrchestrator
                     $"Scan aborted: the current game window layout ({entrySurface.Width}x{entrySurface.Height}, aspect {entrySurface.AspectRatio:F4}) is outside the supported wide-layout family."
                 );
             }
+            if (IsExplicitDangerKind(entrySurface.DangerKind))
+            {
+                throw new InvalidOperationException(
+                    $"Scan aborted: detected dangerous live surface '{entrySurface.DangerKind}' while normalizing roster entry."
+                );
+            }
             if (entrySurface.LooksLikeRosterScreen)
             {
                 AppendTrace($"visible-slice-entry attempt={attempt + 1}: already-at-roster");
@@ -1096,6 +1171,7 @@ public sealed class ScanOrchestrator
                 recoveryScript,
                 recoveryStepDelayMs,
                 recoveryPostDelayMs,
+                0,
                 expectFrameChange: false,
                 ct
             );
@@ -1103,6 +1179,12 @@ public sealed class ScanOrchestrator
             AppendTrace(
                 $"visible-slice-entry post-recovery attempt={attempt + 1}: surface={postRecoverySurface.SurfaceKind.ToString().ToLowerInvariant()} danger={postRecoverySurface.LooksDangerous.ToString().ToLowerInvariant()} home={postRecoverySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postRecoverySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={postRecoverySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={postRecoverySurface.AspectRatio:F4}"
             );
+            if (IsExplicitDangerKind(postRecoverySurface.DangerKind))
+            {
+                throw new InvalidOperationException(
+                    $"Scan aborted: detected dangerous live surface '{postRecoverySurface.DangerKind}' after recovery."
+                );
+            }
             if (postRecoverySurface.LooksLikeRosterScreen)
             {
                 return;
@@ -1131,6 +1213,11 @@ public sealed class ScanOrchestrator
         try
         {
             var inspection = LiveUiDetector.InspectLiveSafetySurface(stateProbePath);
+            var dangerInspection = inspection.SurfaceKind == LiveSafeSurfaceKind.Unknown &&
+                                   inspection.LooksLikeSupportedWideLayout
+                ? await TryInspectDangerSurfaceAsync(stateProbePath, ct)
+                : null;
+            var dangerKind = dangerInspection?.DangerKind;
             return new EntrySurfaceProbe(
                 inspection.SurfaceKind == LiveSafeSurfaceKind.Home,
                 inspection.SurfaceKind == LiveSafeSurfaceKind.Roster,
@@ -1140,8 +1227,8 @@ public sealed class ScanOrchestrator
                 inspection.Height,
                 inspection.AspectRatio,
                 inspection.LooksLikeSupportedWideLayout,
-                inspection.LooksDangerous,
-                inspection.DangerKind
+                inspection.LooksDangerous || IsExplicitDangerKind(dangerKind),
+                IsExplicitDangerKind(dangerKind) ? dangerKind! : inspection.DangerKind
             );
         }
         finally
@@ -1175,7 +1262,7 @@ public sealed class ScanOrchestrator
     )
     {
         if (surface.SurfaceKind != LiveSafeSurfaceKind.Home ||
-            !await TryExecuteGameScriptAsync(entryScript, entryStepDelayMs, entryPostDelayMs, expectFrameChange: true, ct))
+            !await TryExecuteGameScriptAsync(entryScript, entryStepDelayMs, entryPostDelayMs, 220, expectFrameChange: true, ct))
         {
             return false;
         }
@@ -1189,6 +1276,12 @@ public sealed class ScanOrchestrator
         AppendTrace(
             $"visible-slice-entry post-entry attempt={attempt}: surface={postEntrySurface.SurfaceKind.ToString().ToLowerInvariant()} danger={postEntrySurface.LooksDangerous.ToString().ToLowerInvariant()} home={postEntrySurface.LooksLikeHomeScreen.ToString().ToLowerInvariant()} roster={postEntrySurface.LooksLikeRosterScreen.ToString().ToLowerInvariant()} layout_supported={postEntrySurface.LooksLikeSupportedWideLayout.ToString().ToLowerInvariant()} aspect={postEntrySurface.AspectRatio:F4}"
         );
+        if (IsExplicitDangerKind(postEntrySurface.DangerKind))
+        {
+            throw new InvalidOperationException(
+                $"Scan aborted: detected dangerous live surface '{postEntrySurface.DangerKind}' after roster-entry click."
+            );
+        }
         return postEntrySurface.LooksLikeRosterScreen;
     }
 
@@ -1224,7 +1317,9 @@ public sealed class ScanOrchestrator
         if (probe.LooksDangerous || probe.SurfaceKind != step.ExpectedSurfaceKind)
         {
             throw new InvalidOperationException(
-                $"Scan aborted: pre-click safety guard expected {step.ExpectedSurfaceKind.ToString().ToLowerInvariant()} before step {stepNumber}, but observed {probe.SurfaceKind.ToString().ToLowerInvariant()}."
+                IsExplicitDangerKind(probe.DangerKind)
+                    ? $"Scan aborted: pre-click safety guard detected dangerous live surface '{probe.DangerKind}' before step {stepNumber}."
+                    : $"Scan aborted: pre-click safety guard expected {step.ExpectedSurfaceKind.ToString().ToLowerInvariant()} before step {stepNumber}, but observed {probe.SurfaceKind.ToString().ToLowerInvariant()}."
             );
         }
 
@@ -1235,6 +1330,7 @@ public sealed class ScanOrchestrator
         string script,
         int stepDelayMs,
         int postDelayMs,
+        int minPostChangeSettleMs,
         bool expectFrameChange,
         string failureContext,
         CancellationToken ct
@@ -1282,20 +1378,20 @@ public sealed class ScanOrchestrator
             }
             AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=execute-complete");
 
-            if (postDelayMs > 0)
-            {
-                await Task.Delay(postDelayMs, ct);
-            }
-
             if (!expectFrameChange)
             {
+                if (postDelayMs > 0)
+                {
+                    await Task.Delay(postDelayMs, ct);
+                }
                 return;
             }
 
             AppendTrace($"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=after-hash-start");
-            var afterHash = NormalizeFrameHash(_nativeBridge.CaptureFrameHash());
+            var (afterHash, waitedMs) = await WaitForFrameChangeProbeAsync(beforeHash, postDelayMs, ct);
+            waitedMs = await ApplyPostChangeSettleAsync(waitedMs, minPostChangeSettleMs, ct);
             AppendTrace(
-                $"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=after-hash-complete empty={string.IsNullOrWhiteSpace(afterHash)}"
+                $"script-stage context={failureContext} attempt={attempt}/{maxAttempts} stage=after-hash-complete empty={string.IsNullOrWhiteSpace(afterHash)} waitedMs={waitedMs}"
             );
             if (string.IsNullOrWhiteSpace(beforeHash) ||
                 string.IsNullOrWhiteSpace(afterHash) ||
@@ -1330,6 +1426,7 @@ public sealed class ScanOrchestrator
         string script,
         int stepDelayMs,
         int postDelayMs,
+        int minPostChangeSettleMs,
         bool expectFrameChange,
         CancellationToken ct
     )
@@ -1354,20 +1451,20 @@ public sealed class ScanOrchestrator
         }
         AppendTrace($"script-try-stage script={script} stage=execute-complete");
 
-        if (postDelayMs > 0)
-        {
-            await Task.Delay(postDelayMs, ct);
-        }
-
         if (!expectFrameChange)
         {
+            if (postDelayMs > 0)
+            {
+                await Task.Delay(postDelayMs, ct);
+            }
             _gameFocusKnownGood = true;
             return true;
         }
 
         AppendTrace($"script-try-stage script={script} stage=after-hash-start");
-        var afterHash = NormalizeFrameHash(_nativeBridge.CaptureFrameHash());
-        AppendTrace($"script-try-stage script={script} stage=after-hash-complete empty={string.IsNullOrWhiteSpace(afterHash)}");
+        var (afterHash, waitedMs) = await WaitForFrameChangeProbeAsync(beforeHash, postDelayMs, ct);
+        waitedMs = await ApplyPostChangeSettleAsync(waitedMs, minPostChangeSettleMs, ct);
+        AppendTrace($"script-try-stage script={script} stage=after-hash-complete empty={string.IsNullOrWhiteSpace(afterHash)} waitedMs={waitedMs}");
         if (string.IsNullOrWhiteSpace(beforeHash) || string.IsNullOrWhiteSpace(afterHash))
         {
             _gameFocusKnownGood = false;
@@ -1383,6 +1480,85 @@ public sealed class ScanOrchestrator
 
     private static string NormalizeFrameHash(string? value) =>
         string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+    private async Task<(string Hash, int WaitedMs)> WaitForFrameChangeProbeAsync(
+        string beforeHash,
+        int maxWaitMs,
+        CancellationToken ct
+    )
+    {
+        var initialDelayMs = ReadNonNegativeIntFromEnvironment("IKA_FRAME_CHANGE_INITIAL_DELAY_MS", 90);
+        var pollDelayMs = ReadPositiveIntFromEnvironment("IKA_FRAME_CHANGE_POLL_MS", 60);
+        var waitedMs = 0;
+
+        if (maxWaitMs > 0 && initialDelayMs > 0)
+        {
+            var delayMs = Math.Min(initialDelayMs, maxWaitMs);
+            await Task.Delay(delayMs, ct);
+            waitedMs += delayMs;
+        }
+
+        while (true)
+        {
+            var afterHash = NormalizeFrameHash(_nativeBridge.CaptureFrameHash());
+            if (string.IsNullOrWhiteSpace(beforeHash) ||
+                string.IsNullOrWhiteSpace(afterHash) ||
+                !string.Equals(beforeHash, afterHash, StringComparison.OrdinalIgnoreCase))
+            {
+                return (afterHash, waitedMs);
+            }
+
+            if (waitedMs >= maxWaitMs)
+            {
+                return (afterHash, waitedMs);
+            }
+
+            var remainingMs = maxWaitMs - waitedMs;
+            var delayMs = Math.Min(pollDelayMs, remainingMs);
+            if (delayMs <= 0)
+            {
+                return (afterHash, waitedMs);
+            }
+
+            await Task.Delay(delayMs, ct);
+            waitedMs += delayMs;
+        }
+    }
+
+    private static async Task<int> ApplyPostChangeSettleAsync(
+        int waitedMs,
+        int minPostChangeSettleMs,
+        CancellationToken ct
+    )
+    {
+        if (minPostChangeSettleMs <= waitedMs)
+        {
+            return waitedMs;
+        }
+
+        var settleDelayMs = minPostChangeSettleMs - waitedMs;
+        await Task.Delay(settleDelayMs, ct);
+        return waitedMs + settleDelayMs;
+    }
+
+    private async Task<DangerSurfaceInspectionResult?> TryInspectDangerSurfaceAsync(
+        string imagePath,
+        CancellationToken ct
+    )
+    {
+        try
+        {
+            return await _worker.InspectDangerSurfaceAsync(imagePath, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsExplicitDangerKind(string? dangerKind) =>
+        !string.IsNullOrWhiteSpace(dangerKind) &&
+        !string.Equals(dangerKind, "unknown_surface", StringComparison.OrdinalIgnoreCase);
 
     private static bool ScriptUsesPointerInput(string? script)
     {
@@ -1404,6 +1580,11 @@ public sealed class ScanOrchestrator
         LiveSafeSurfaceKind currentSafeSurfaceKind
     )
     {
+        if (IsRosterSelectionStep(step))
+        {
+            return LiveSafeSurfaceKind.Roster;
+        }
+
         if (RestoresRosterScreen(step))
         {
             return LiveSafeSurfaceKind.Roster;

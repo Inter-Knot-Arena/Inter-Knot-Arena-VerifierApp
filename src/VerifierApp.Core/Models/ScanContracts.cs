@@ -34,6 +34,12 @@ public sealed record EquipmentOverviewInspectionResult(
     IReadOnlyList<string>? LowConfReasons
 );
 
+public sealed record DangerSurfaceInspectionResult(
+    bool Dangerous,
+    string DangerKind,
+    IReadOnlyList<string>? Signals
+);
+
 public sealed record AgentScanResult(
     string AgentId,
     double? Level,

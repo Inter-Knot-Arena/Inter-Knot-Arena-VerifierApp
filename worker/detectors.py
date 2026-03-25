@@ -134,6 +134,61 @@ _ROSTER_AGENT_REGIONS = (
     (0.605, 0.479, 0.141, 0.278),
 )
 
+_DANGER_SURFACE_CROP_BOXES: dict[str, tuple[float, float, float, float]] = {
+    "header": (0.22, 0.00, 0.56, 0.15),
+    "top_right": (0.67, 0.00, 0.31, 0.16),
+    "center_modal": (0.24, 0.20, 0.52, 0.46),
+    "bottom_cta": (0.22, 0.68, 0.56, 0.20),
+}
+
+_DANGER_KEYWORD_GROUPS: dict[str, tuple[str, ...]] = {
+    "signal_search": (
+        "SIGNAL SEARCH",
+        "SIGNAL",
+        "SEARCH",
+        "CHANNEL",
+        "ПОИСК СИГНАЛА",
+        "ПОИСК",
+        "СИГНАЛ",
+        "КАНАЛ",
+    ),
+    "shop": (
+        "STORE",
+        "SHOP",
+        "EXCHANGE",
+        "SUPPLY",
+        "МАГАЗИН",
+        "ОБМЕН",
+        "ТОРГОВЛЯ",
+    ),
+    "payment": (
+        "PURCHASE",
+        "TOP UP",
+        "TOP-UP",
+        "PAYMENT",
+        "POLYCHROME",
+        "MONOCHROME",
+        "PURCHASE DETAILS",
+        "ПОКУПКА",
+        "ПЛАТЕЖ",
+        "ПОЛИХРОМ",
+        "МОНОХРОМ",
+        "ПОПОЛНИТЬ",
+    ),
+    "purchase_confirm": (
+        "CONFIRM",
+        "CANCEL",
+        "BUY",
+        "USE",
+        "CONFIRM PURCHASE",
+        "PURCHASE CONFIRMATION",
+        "ПОДТВЕРДИТЬ",
+        "ОТМЕНА",
+        "КУПИТЬ",
+        "ИСПОЛЬЗОВАТЬ",
+    ),
+}
+
 
 def _load_ocr_runtime():
     module = importlib.import_module("scanner")
@@ -149,6 +204,11 @@ def _load_ocr_module():
 def _load_ocr_equipment_inspector():
     module = importlib.import_module("scanner")
     return getattr(module, "inspect_equipment_capture")
+
+
+def _load_ocr_text_runtime():
+    module = importlib.import_module("amplifier_identity")
+    return getattr(module, "language_tag_for_locale"), getattr(module, "run_winrt_ocr_batch")
 
 
 def _load_cv_runtime():
@@ -511,6 +571,114 @@ def inspect_equipment_overview(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(result, dict):
         raise ValueError("Equipment overview inspector returned invalid payload.")
     return result
+
+
+def _crop_fractional_box(frame: np.ndarray, box: tuple[float, float, float, float]) -> np.ndarray | None:
+    if frame.size == 0:
+        return None
+    height, width = frame.shape[:2]
+    x0 = max(0, int(round(box[0] * width)))
+    y0 = max(0, int(round(box[1] * height)))
+    x1 = min(width, int(round((box[0] + box[2]) * width)))
+    y1 = min(height, int(round((box[1] + box[3]) * height)))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    crop = frame[y0:y1, x0:x1]
+    return crop if crop.size else None
+
+
+def _normalize_ocr_text(value: str) -> str:
+    return " ".join(str(value or "").upper().replace("\n", " ").replace("\r", " ").split())
+
+
+def _resolve_danger_kind(signals: set[str], normalized_text: str) -> str:
+    has_payment = "payment" in signals
+    has_confirm = "purchase_confirm" in signals
+    if has_confirm and (
+        "BUY" in normalized_text or
+        "PURCHASE" in normalized_text or
+        "USE" in normalized_text or
+        "CONFIRM" in normalized_text or
+        "КУПИТЬ" in normalized_text or
+        "ПОДТВЕРДИТЬ" in normalized_text or
+        "ИСПОЛЬЗОВАТЬ" in normalized_text
+    ):
+        return "purchase_confirm"
+    if has_payment:
+        return "payment"
+    if "signal_search" in signals:
+        return "signal_search"
+    if "shop" in signals:
+        return "shop"
+    if has_confirm:
+        return "purchase_confirm"
+    return ""
+
+
+def inspect_danger_surface(payload: Dict[str, Any]) -> Dict[str, Any]:
+    path = str(payload.get("path", "")).strip()
+    if not path:
+        raise ValueError("Danger surface path is required.")
+
+    language_tag_for_locale, run_winrt_ocr_batch = _load_ocr_text_runtime()
+    image = cv2.imread(path, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError(f"Failed to decode danger surface image: {path}")
+
+    runtime_temp_root = str(os.environ.get("IKA_RUNTIME_TEMP_ROOT") or "").strip()
+    if runtime_temp_root:
+        temp_root = Path(runtime_temp_root) / "danger_surface"
+    else:
+        temp_root = Path(tempfile.gettempdir()) / "ika_verifier" / "danger_surface"
+    temp_root.mkdir(parents=True, exist_ok=True)
+
+    combined_texts: list[str] = []
+    matched_signals: set[str] = set()
+    with tempfile.TemporaryDirectory(prefix="danger_surface_", dir=str(temp_root)) as raw_tmp:
+        temp_dir = Path(raw_tmp)
+        crop_specs: list[tuple[str, str]] = []
+        for crop_name, box in _DANGER_SURFACE_CROP_BOXES.items():
+            crop = _crop_fractional_box(image, box)
+            if crop is None:
+                continue
+            crop_path = temp_dir / f"{crop_name}.png"
+            if not cv2.imwrite(str(crop_path), crop):
+                continue
+            crop_specs.append((crop_name, str(crop_path)))
+
+        if not crop_specs:
+            return {"dangerous": False, "dangerKind": "", "signals": []}
+
+        crops = [{"id": crop_name, "path": crop_path} for crop_name, crop_path in crop_specs]
+        ocr_results: dict[str, str] = {}
+        for locale in ("EN", "RU"):
+            try:
+                ocr_results.update(
+                    run_winrt_ocr_batch(
+                        crops,
+                        language_tag=language_tag_for_locale(locale),
+                        temp_root=temp_dir,
+                    )
+                )
+            except Exception:
+                continue
+
+        for crop_name, _ in crop_specs:
+            normalized = _normalize_ocr_text(str(ocr_results.get(crop_name, "")))
+            if not normalized:
+                continue
+            combined_texts.append(normalized)
+            for signal, keywords in _DANGER_KEYWORD_GROUPS.items():
+                if any(keyword in normalized for keyword in keywords):
+                    matched_signals.add(signal)
+
+    combined_text = " ".join(combined_texts)
+    danger_kind = _resolve_danger_kind(matched_signals, combined_text)
+    return {
+        "dangerous": bool(danger_kind),
+        "dangerKind": danger_kind,
+        "signals": sorted(matched_signals),
+    }
 
 
 def _resolve_detection_sets(payload: Dict[str, Any]) -> tuple[list[str], list[str], list[str], list[str]]:
